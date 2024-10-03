@@ -1,4 +1,0 @@
-RAW_DATA = /Users/amandaschott/Desktop/gui_test
-PROCESSED_DATA = /Users/amandaschott/Desktop/gui_test
-PROBE_FILES = /Users/amandaschott/Desktop/gui_test/probe_configs
-DEFAULT_PROBE = /Users/amandaschott/Desktop/gui_test/probe_configs/A1x32-Edge-10mm-40-177_config.json

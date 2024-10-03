@@ -24,28 +24,6 @@ import selection_popups as sp
 from channel_selection_gui import ChannelSelectionWindow
 from ds_classification_gui import DS_CSDWindow
 
-#%%
-
-def startup():
-    if not Path('default_params.txt').exists():
-        # create settings text file from hidden params
-        _ddict = np.load('.default_params.npy', allow_pickle=True).item()
-        ephys.write_param_file(_ddict)
-        
-    if not Path('default_folders.txt').exists():
-        raw_ddir = str(app_ddir)
-        save_ddir = str(app_ddir)
-        probe_ddir = str(Path(app_ddir, 'probe_configs'))
-        if not Path(probe_ddir).exists():
-            os.mkdir(probe_ddir)
-        probe_files = ephys.get_probe_filepaths(probe_ddir)
-        probe_file = ['' if len(probe_files)==0 else probe_files[0]]
-        # set default base directories to the app folder
-        with open('default_folders.txt', 'w') as fid:
-            for k in ['RAW_DATA','PROCESSED_DATA','PROBE_FILES']:
-                fid.write(k + ' = ' + str(app_ddir) + '\n')
-
-
     
 class hippos(QtWidgets.QMainWindow):
     def __init__(self):
