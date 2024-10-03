@@ -9,7 +9,7 @@ import sys
 import os
 from pathlib import Path
 import numpy as np
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 import probeinterface as prif
 import pdb
 # set app folder as working directory
@@ -20,8 +20,10 @@ import pyfx
 import ephys
 import data_processing as dp
 import gui_items as gi
+import selection_popups as sp
 from channel_selection_gui import ChannelSelectionWindow
 from ds_classification_gui import DS_CSDWindow
+
 #%%
 
 def startup():
@@ -30,9 +32,16 @@ def startup():
         _ddict = np.load('.default_params.npy', allow_pickle=True).item()
         ephys.write_param_file(_ddict)
         
-    if not Path('base_folders.txt').exists():
+    if not Path('default_folders.txt').exists():
+        raw_ddir = str(app_ddir)
+        save_ddir = str(app_ddir)
+        probe_ddir = str(Path(app_ddir, 'probe_configs'))
+        if not Path(probe_ddir).exists():
+            os.mkdir(probe_ddir)
+        probe_files = ephys.get_probe_filepaths(probe_ddir)
+        probe_file = ['' if len(probe_files)==0 else probe_files[0]]
         # set default base directories to the app folder
-        with open('base_folders.txt', 'w') as fid:
+        with open('default_folders.txt', 'w') as fid:
             for k in ['RAW_DATA','PROCESSED_DATA','PROBE_FILES']:
                 fid.write(k + ' = ' + str(app_ddir) + '\n')
 
@@ -95,7 +104,7 @@ class hippos(QtWidgets.QMainWindow):
                        )
         
         # create popup window for processed data
-        self.analysis_popup = gi.ProcessedDirectorySelectionPopup(go_to_last=False, parent=self)
+        self.analysis_popup = sp.ProcessedDirectorySelectionPopup(go_to_last=False, parent=self)
         self.analysis_popup.ab.option1_btn.clicked.connect(self.ch_selection_popup)
         self.analysis_popup.ab.option2_btn.clicked.connect(self.classify_ds_popup)
         
@@ -104,6 +113,8 @@ class hippos(QtWidgets.QMainWindow):
         self.process_btn.setStyleSheet(mode_btn_ss)
         self.analyze_btn = QtWidgets.QPushButton('Analyze data')
         self.analyze_btn.setStyleSheet(mode_btn_ss)
+        self.probe_btn =  QtWidgets.QPushButton('Create probe')
+        self.probe_btn.setStyleSheet(mode_btn_ss)
         self.view_params_btn = QtWidgets.QPushButton('View parameters')
         self.view_params_btn.setStyleSheet(mode_btn_ss)
         self.base_folder_btn = QtWidgets.QPushButton('Base folders')
@@ -111,6 +122,7 @@ class hippos(QtWidgets.QMainWindow):
         # connect to functions
         self.process_btn.clicked.connect(self.raw_data_popup)
         self.analyze_btn.clicked.connect(self.processed_data_popup)
+        self.probe_btn.clicked.connect(self.probe_popup)
         self.view_params_btn.clicked.connect(self.view_param_popup)
         self.base_folder_btn.clicked.connect(self.base_folder_popup)
         
@@ -120,6 +132,9 @@ class hippos(QtWidgets.QMainWindow):
         self.centralLayout.addWidget(self.base_folder_btn)
         self.setCentralWidget(self.centralWidget)
         
+    def probe_popup(self):
+        print('probe_popup called')
+        #popup = gi.ProbePopup()
         
     def raw_data_popup(self, init_raw_ddir='base', init_save_ddir='base'):
         """ Select raw data for processing """
@@ -245,27 +260,68 @@ class hippos(QtWidgets.QMainWindow):
         screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
         qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
         self.move(qrect.topLeft())
-        
-#%%
-if __name__ == '__main__':
+
+def run():
     args = list(sys.argv)
     if len(args) == 1:
         args.append('')
-        
-    # TO-DO
-    # add notes section
-    # add behavior data
-    
-    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/NN_JG023_2probes2/'
-    
     app = QtWidgets.QApplication(args)
     app.setStyle('Fusion')
     app.setQuitOnLastWindowClosed(True)
-    startup()
     
+    if not Path('default_params.txt').exists():
+        # create settings text file from hidden params
+        _ddict = np.load('.default_params.npy', allow_pickle=True).item()
+        ephys.write_param_file(_ddict)
+        
+    if not Path('default_folders.txt').exists():
+        # set data base directories to the app folder
+        raw_ddir = str(app_ddir)
+        processed_ddir = str(app_ddir)
+        probe_ddir = str(Path(app_ddir, 'probe_configs'))  # create probe folder
+        if not Path(probe_ddir).exists():
+            os.mkdir(probe_ddir)
+        # default probe file
+        probe_files = ephys.get_probe_filepaths(probe_ddir)
+        if len(probe_files) > 0:
+            probe_file = str(Path(app_ddir, probe_files[0]))
+        else:
+            probe_file = ''
+        ephys.write_base_dirs([raw_ddir, processed_ddir, probe_ddir, probe_file])
+        
+        # prompt user to customize default directories
+        dlg = gi.thing()
+        dlg.exec()
+        
     w = hippos()
     #w = ChannelSelectionWindow(ddir, 0)
     
     w.show()
     w.raise_()
     sys.exit(app.exec())
+    
+if __name__ == '__main__':
+    run()
+#%%
+# if __name__ == '__main__':
+#     args = list(sys.argv)
+#     if len(args) == 1:
+#         args.append('')
+        
+#     # TO-DO
+#     # add notes section
+#     # add behavior data
+    
+#     #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/NN_JG023_2probes2/'
+    
+#     app = QtWidgets.QApplication(args)
+#     app.setStyle('Fusion')
+#     app.setQuitOnLastWindowClosed(True)
+#     startup()
+    
+#     w = hippos()
+#     #w = ChannelSelectionWindow(ddir, 0)
+    
+#     w.show()
+#     w.raise_()
+#     sys.exit(app.exec())

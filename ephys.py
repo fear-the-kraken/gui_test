@@ -45,9 +45,9 @@ def get_recording_path(ppath='', rec='', txt='Select recording folder'):
 
 
 def base_dirs(return_keys=False):
-    """ Return default data directories saved in base_folders.txt """
+    """ Return default data directories saved in default_folders.txt """
     # Mode 0 for paths only, 1 for keys only
-    with open('base_folders.txt', 'r') as fid:
+    with open('default_folders.txt', 'r') as fid:
         keys,vals = zip(*[map(str.strip, l.split('=')) for l in fid.readlines()])
     if not return_keys:
         return vals
@@ -55,11 +55,12 @@ def base_dirs(return_keys=False):
 
 
 def write_base_dirs(ddir_list):
-    """ Save input directories to base_folders.txt """
-    assert len(ddir_list) == 3
-    with open('base_folders.txt', 'w') as fid:
-        for k,path in zip(['RAW_DATA','PROCESSED_DATA','PROBE_FILES'], ddir_list):
+    """ Save input directories to default_folders.txt """
+    assert len(ddir_list) == 4
+    with open('default_folders.txt', 'w') as fid:
+        for k,path in zip(['RAW_DATA','PROCESSED_DATA','PROBE_FILES', 'DEFAULT_PROBE'], ddir_list):
             fid.write(k + ' = ' + str(path) + '\n')
+
 
 def read_param_file(filepath='default_params.txt'):
     """ Return dictionary of parameters loaded from .txt file """
@@ -264,8 +265,20 @@ def load_event_dfs(ddir, event, iprb=-1, mask=False):
 ########        PROBE CONFIGURATION       ########
 ##################################################
 
+def get_probe_filepaths(ddir):
+    """ List all probe files in folder $ddir """
+    probe_files = []
+    for f in os.listdir(str(ddir)):
+        if os.path.splitext(f)[-1] not in ['.json', '.prb', '.mat']:
+            continue
+        tmp = read_probe_file(str(Path(ddir, f)))
+        if tmp is not None:
+            probe_files.append(f)
+    return probe_files
+    
+
 def read_probe_file(fpath):
-    """ Load probe configuration from .json, .mat, or .prb, file """
+    """ Load probe configuration from .json, .mat, or .prb file """
     if not os.path.exists(fpath):
         return
     # load data according to file extension
