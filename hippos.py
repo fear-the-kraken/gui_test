@@ -21,6 +21,7 @@ import ephys
 import data_processing as dp
 import gui_items as gi
 import selection_popups as sp
+from probe_handler import probegod
 from channel_selection_gui import ChannelSelectionWindow
 from ds_classification_gui import DS_CSDWindow
 
@@ -87,16 +88,18 @@ class hippos(QtWidgets.QMainWindow):
         self.analysis_popup.ab.option2_btn.clicked.connect(self.classify_ds_popup)
         
         # create main buttons
+        self.base_folder_btn = QtWidgets.QPushButton('Base folders')
+        self.base_folder_btn.setStyleSheet(mode_btn_ss)
+        self.view_params_btn = QtWidgets.QPushButton('View parameters')
+        self.view_params_btn.setStyleSheet(mode_btn_ss)
+        self.probe_btn =  QtWidgets.QPushButton('Create probe')
+        self.probe_btn.setStyleSheet(mode_btn_ss)
         self.process_btn = QtWidgets.QPushButton('Process raw data')
         self.process_btn.setStyleSheet(mode_btn_ss)
         self.analyze_btn = QtWidgets.QPushButton('Analyze data')
         self.analyze_btn.setStyleSheet(mode_btn_ss)
-        self.probe_btn =  QtWidgets.QPushButton('Create probe')
-        self.probe_btn.setStyleSheet(mode_btn_ss)
-        self.view_params_btn = QtWidgets.QPushButton('View parameters')
-        self.view_params_btn.setStyleSheet(mode_btn_ss)
-        self.base_folder_btn = QtWidgets.QPushButton('Base folders')
-        self.base_folder_btn.setStyleSheet(mode_btn_ss)
+        
+        
         # connect to functions
         self.process_btn.clicked.connect(self.raw_data_popup)
         self.analyze_btn.clicked.connect(self.processed_data_popup)
@@ -104,73 +107,84 @@ class hippos(QtWidgets.QMainWindow):
         self.view_params_btn.clicked.connect(self.view_param_popup)
         self.base_folder_btn.clicked.connect(self.base_folder_popup)
         
+        self.centralLayout.addWidget(self.base_folder_btn)
+        self.centralLayout.addWidget(self.view_params_btn)
+        self.centralLayout.addWidget(self.probe_btn)
         self.centralLayout.addWidget(self.process_btn)
         self.centralLayout.addWidget(self.analyze_btn)
-        self.centralLayout.addWidget(self.view_params_btn)
-        self.centralLayout.addWidget(self.base_folder_btn)
+        
         self.setCentralWidget(self.centralWidget)
         
     def probe_popup(self):
-        print('probe_popup called')
-        #popup = gi.ProbePopup()
+        probe = probegod.run_probe_window(accept_visible=False, title='Create probe', parent=self)
+        
         
     def raw_data_popup(self, init_raw_ddir='base', init_save_ddir='base'):
         """ Select raw data for processing """
-        popup = gi.RawDirectorySelectionPopup(init_raw_ddir, init_save_ddir, parent=self)
+        popup = sp.RawDirectorySelectionPopup(init_raw_ddir, init_save_ddir, parent=self)
         res = popup.exec()
         if not res:
             return
-        # get paths to raw data directory, save directory, and probe file
-        raw_ddir = popup.raw_ddir         # raw data directory
-        save_ddir = popup.processed_ddir  # processed data location
-        probe = popup.probe               # channel map for raw signal array
-        nch = probe.get_contact_count()
-        PARAMS = dict(self.PARAMS)
         
-        # load raw files and recording info, make sure probe maps onto raw signals
-        (pri_mx, aux_mx), fs = dp.load_raw_data(raw_ddir) # removed info
-        num_channels = pri_mx.shape[0]
-        dur = pri_mx.shape[1] / fs
-        if num_channels % nch > 0:
-            msg = f'ERROR: Cannot map {nch} probe contacts to {num_channels} raw data signals'
-            res = gi.MsgboxError(msg, parent=self)
-            return
-        lfp_fs = PARAMS.pop('lfp_fs')
-        #info['lfp_fs'] = lfp_fs = PARAMS.pop('lfp_fs')
-        #info['lfp_units'] = 'mV'
+        # save_ddir = popup.processed_ddir
+        # ephys.load_event_dfs(save_ddir, 'ds', -1)
+        #pdb.set_trace()
         
-        # create probe group for recording
-        probe_group = ephys.make_probe_group(probe, int(num_channels / nch))
+        # # get paths to raw data directory, save directory, and probe file
+        # raw_ddir = popup.raw_ddir         # raw data directory
+        # save_ddir = popup.processed_ddir  # processed data location
+        # probe = popup.probe               # channel map for raw signal array
+        # nch = probe.get_contact_count()
+        # PARAMS = dict(self.PARAMS)
         
-        # get LFP array for each probe
-        lfp_list = dp.extract_data_by_probe(pri_mx, probe_group, fs=fs, lfp_fs=lfp_fs)#, fs=info.fs, lfp_fs=lfp_fs,
-                                            #units=info.units, lfp_units=info.lfp_units)
-        lfp_time = np.linspace(0, dur, int(lfp_list[0].shape[1]))
+        # # load raw files and recording info, make sure probe maps onto raw signals
+        # (pri_mx, aux_mx), fs = dp.load_raw_data(raw_ddir) # removed info
+        # num_channels = pri_mx.shape[0]
+        # dur = pri_mx.shape[1] / fs
+        # if num_channels % nch > 0:
+        #     msg = f'ERROR: Cannot map {nch} probe contacts to {num_channels} raw data signals'
+        #     res = gi.MsgboxError(msg, parent=self)
+        #     return
+        # lfp_fs = PARAMS.pop('lfp_fs')
+        # #info['lfp_fs'] = lfp_fs = PARAMS.pop('lfp_fs')
+        # #info['lfp_units'] = 'mV'
         
-        # process data by probe, save files in target directory 
-        dp.process_all_probes(lfp_list, lfp_time, lfp_fs, PARAMS, save_ddir)
-        prif.write_probeinterface(Path(save_ddir, 'probe_group'), probe_group)
+        # #lfp0 = pri_mx[0:32, :]
+        # #lfp1 = pri_mx[32:, :]
+        # #lfp_list = [lfp0, lfp1]
         
-        # process auxilary channels
-        if aux_mx.size > 0:
-            aux_dn = dp.extract_data(aux_mx, np.arange(aux_mx.shape[0]), fs=fs, 
-                                     lfp_fs=lfp_fs, units='V', lfp_units='V')
-            #np.save(Path(save_ddir, 'AUX.npy'), aux_dn)
-            aux_dlg = gi.AuxDialog(aux_dn.shape[0], parent=self)
-            res = aux_dlg.exec()
-            if res:
-                for i,fname in enumerate(aux_dlg.aux_files):
-                    if fname != '':
-                        np.save(Path(save_ddir, fname), aux_dn[i])
+        # # create probe group for recording
+        # probe_group = ephys.make_probe_group(probe, int(num_channels / nch))
+        
+        # # get LFP array for each probe
+        # lfp_list = dp.extract_data_by_probe(pri_mx, probe_group, fs=fs, lfp_fs=lfp_fs)#, fs=info.fs, lfp_fs=lfp_fs,
+        #                                     #units=info.units, lfp_units=info.lfp_units)
+        # lfp_time = np.linspace(0, dur, int(lfp_list[0].shape[1]))
+        
+        # # process data by probe, save files in target directory 
+        # dp.process_all_probes(lfp_list, lfp_time, lfp_fs, PARAMS, save_ddir)
+        # prif.write_probeinterface(Path(save_ddir, 'probe_group'), probe_group)
+        
+        # # process auxilary channels
+        # if aux_mx.size > 0:
+        #     aux_dn = dp.extract_data(aux_mx, np.arange(aux_mx.shape[0]), fs=fs, 
+        #                              lfp_fs=lfp_fs, units='V', lfp_units='V')
+        #     #np.save(Path(save_ddir, 'AUX.npy'), aux_dn)
+        #     aux_dlg = gi.AuxDialog(aux_dn.shape[0], parent=self)
+        #     res = aux_dlg.exec()
+        #     if res:
+        #         for i,fname in enumerate(aux_dlg.aux_files):
+        #             if fname != '':
+        #                 np.save(Path(save_ddir, fname), aux_dn[i])
             
-        # pop-up messagebox appears when processing is complete
-        msgbox = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Information, '',
-                                       'Data processing complete!', QtWidgets.QMessageBox.Ok, self)
-        # set check icon
-        chk_icon = self.style().standardIcon(QtWidgets.QStyle.SP_DialogApplyButton)
-        px_size = msgbox.findChild(QtWidgets.QLabel, 'qt_msgboxex_icon_label').pixmap().size()
-        msgbox.setIconPixmap(chk_icon.pixmap(px_size))
-        msgbox.exec()
+        # # pop-up messagebox appears when processing is complete
+        # msgbox = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Information, '',
+        #                                'Data processing complete!', QtWidgets.QMessageBox.Ok, self)
+        # # set check icon
+        # chk_icon = self.style().standardIcon(QtWidgets.QStyle.SP_DialogApplyButton)
+        # px_size = msgbox.findChild(QtWidgets.QLabel, 'qt_msgboxex_icon_label').pixmap().size()
+        # msgbox.setIconPixmap(chk_icon.pixmap(px_size))
+        # msgbox.exec()
         
         
     def processed_data_popup(self, _, init_ddir=None, go_to_last=True):
@@ -182,19 +196,22 @@ class hippos(QtWidgets.QMainWindow):
     def ch_selection_popup(self):
         """ Launch event channel selection window """
         ddir = self.analysis_popup.ddir
-        iprb = self.analysis_popup.current_probe
-        self.ch_selection_dlg = ChannelSelectionWindow(ddir, iprb=iprb, parent=self.analysis_popup)
+        probe_list = self.analysis_popup.probe_group.probes
+        iprb = self.analysis_popup.probe_idx
+        self.ch_selection_dlg = ChannelSelectionWindow(ddir, probe_list=probe_list, 
+                                                       iprb=iprb, parent=self.analysis_popup)
         self.ch_selection_dlg.show()
         self.ch_selection_dlg.raise_()
         _ = self.ch_selection_dlg.exec()
         # check for updated files, enable/disable analysis options
-        self.analysis_popup.ab.ddir_toggled(ddir)
+        iprb = int(self.ch_selection_dlg.iprb)
+        self.analysis_popup.ab.ddir_toggled(ddir, iprb)
         
     
     def classify_ds_popup(self):
         """ Launch DS analysis window """
         ddir = self.analysis_popup.ddir
-        iprb = self.analysis_popup.current_probe
+        iprb = self.analysis_popup.probe_idx
         PARAMS = ephys.load_recording_params(ddir)
         self.classify_ds_dlg = DS_CSDWindow(ddir, iprb, self.PARAMS, parent=self.analysis_popup)
         self.classify_ds_dlg.show()
@@ -211,10 +228,10 @@ class hippos(QtWidgets.QMainWindow):
         vstr = [*map(str,vals)]
         klens = [*map(len, keys)]; kmax=max(klens)
         padk = [*map(lambda k: k + '_'*(kmax-len(k))+':', keys)]
-        #rows = [(pdk+vst) for pdk,vst in zip(padk,vstr)]
         html = ['<pre>'+k+v+'</pre>' for k,v in zip(padk,vstr)]
         text = '<h3><tt>DEFAULT PARAMETERS</tt></h3>' + '<hr>' + ''.join(html)
         textwidget = QtWidgets.QTextEdit(text)
+        
         # create popup window for text widget
         dlg = QtWidgets.QDialog(self)
         lay = QtWidgets.QVBoxLayout(dlg)
@@ -227,9 +244,13 @@ class hippos(QtWidgets.QMainWindow):
     
     def base_folder_popup(self):
         """ View or change base data directories """
-        dlg = gi.thing()
+        dlg = sp.BaseFolderPopup(parent=self)
+        
+        qrect = pyfx.ScreenRect(perc_width=0.5, perc_height=0.5, keep_aspect=False)
+        #dlg.setSizeHint(qrect.width(), qrect.height())
         dlg.show()
         dlg.raise_()
+        dlg.exec()
         
     
     def center_window(self):
@@ -268,7 +289,8 @@ def run():
         ephys.write_base_dirs([raw_ddir, processed_ddir, probe_ddir, probe_file])
         
         # prompt user to customize default directories
-        dlg = gi.thing()
+        print('executing thing!')
+        dlg = sp.thing()
         dlg.exec()
         
     w = hippos()

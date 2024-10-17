@@ -8,6 +8,7 @@ Required imports
 import sys
 import os
 import pathlib
+import re
 import json
 import shutil
 import pickle
@@ -22,6 +23,7 @@ import IPython
 import copy
 import quantities
 import sklearn
+import time
 import PyQt5
 import open_ephys
 import probeinterface

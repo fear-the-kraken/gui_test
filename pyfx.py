@@ -70,6 +70,11 @@ def SymLimit(collection, pad=0.0):
     """ Return (negative, positive) maximum absolute value in collection """
     abs_max = np.nanmax(np.abs(MinMax(collection)))
     return (-abs_max, abs_max)
+
+
+def InRange(num, nmin, nmax):
+    """ Return whether the value $num falls between (min, max) bounds """
+    return (num >= nmin) and (num <= nmax)
     
     
 def CenterWin(collection, n, total=True):
@@ -148,7 +153,7 @@ def hue(c, percent, mode=1, cscale=255, alpha=1, res='tuple'):
         
     if cscale == 255:
         adj_c = np.round(adj_c * 255).astype('int')
-    if res == 'tuple' : return tuple(adj_c)
+    if res == 'tuple' : return tuple(adj_c.tolist())
     elif res == 'hex' : return mcolors.to_hex(adj_c, keep_alpha=True)
     else              : return adj_c
     
@@ -197,6 +202,37 @@ def add_legend_items(leg, new_items):
 ########           PYQT WIDGETS           ########
 ##################################################
 
+
+def qapp():
+    """ Check for an existing QApplication instance """
+    app = QtWidgets.QApplication.instance()
+    if not app: 
+        app = QtWidgets.QApplication(sys.argv)
+        app.setStyle('Fusion')
+        app.setQuitOnLastWindowClosed(True)
+    return app
+
+def layout_items(qlayout):
+    """ Return all widgets in a given QBoxLayout """
+    items = [qlayout.itemAt(i).widget() for i in range(qlayout.count())]
+    return items
+
+def stealthy(widget, val):
+    """ Lazy method for updating widgets without triggering signals  """
+    widget.blockSignals(True)
+    try: widget.setValue(val)                   # spinboxes
+    except:
+        try: widget.setCurrentText(val)         # dropdowns
+        except:
+            try: widget.setPlainText(val)       # text edits
+            except:
+                try: widget.setText(val)        # line edits
+                except:
+                    try: widget.setChecked(val) # buttons
+                    except:
+                        pdb.set_trace()
+                        print(f'Could not set value for widget {widget}')
+    widget.blockSignals(False)
 
 class DividerLine(QtWidgets.QFrame):
     """ Basic horizontal (or vertical) separator line """

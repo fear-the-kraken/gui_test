@@ -7,6 +7,7 @@ Created on Tue Sep  3 17:00:24 2024
 """
 import os
 from pathlib import Path
+import re
 import json
 import pickle
 import numpy as np
@@ -17,6 +18,7 @@ import pdb
 # custom modules
 import pyfx
 import ephys
+import gui_items as gi
 
 
 def validate_raw_ddir(ddir):
@@ -59,29 +61,53 @@ def load_openephys_data(ddir):
     continuous_list = OE['continuous']  # continuous data from 1 or more processors
     #settings_file = str(Path(node.directory, 'settings.xml'))
     metadata_list = recording.info['continuous']
-    nch_list = []
-    for i,(continuous,meta) in enumerate(zip(continuous_list, metadata_list)):
-        # load sampling rate, timestamps, and number of channels
-        fs = meta['sample_rate']
-        num_channels = meta['num_channels']
-        tstart, tend = pyfx.Edges(continuous.timestamps)
-        print('under construction')
-        pdb.set_trace()
-        # load channel wiring, units, and bit-volt conversion factors
-        ch_info = [[(d['channel_name'], d['units'], d['bit_volts']), 
-                    d['description']] for d in meta['channels']]
-        hstg = [(int(a[1:]),b,c) for [(a,b,c),d] in ch_info if d.startswith('Headstage')]
-        dev_idx, units, bit_volts = map(list, zip(*hstg))
-        aux = [(int(a[1:]),b,c) for [(a,b,c),d] in ch_info if d.startswith('ADC')]
-        aux_idx, aux_units, aux_bit_volts = map(list, zip(*aux))
-        
-        # load raw signals (uV)
-        first,last = pyfx.Edges(continuous.sample_numbers)
-        raw_signal_array = np.array([x*bv for x,bv in zip(continuous.get_samples(0, last-first+1).T, 
-                                                          bit_volts)])
-        nch = raw_signal_array.shape[0]
     
-    node_name = str(meta['recorded_processor']) + str(meta['recorded_processor_id'])
+    continuous, meta = continuous_list[0], metadata_list[0]
+    if len(continuous_list) > 1:
+        print(f'WARNING: Data extracted from 1 of {len(continuous_list)} existing processors')
+    
+    # load sampling rate, timestamps, and number of channels
+    fs = meta['sample_rate']
+    num_channels = meta['num_channels']
+    tstart, tend = pyfx.Edges(continuous.timestamps)
+    
+    # load channel names and bit volt conversions, find primary channels
+    ch_names, bit_volts = zip(*[(d['channel_name'], d['bit_volts']) for d in meta['channels']])
+    ipri = np.nonzero([*map(lambda n: bool(re.match('C\d+', n)), ch_names)])[0]
+    if len(ipri) > 0:
+        try:
+            units = meta['channels'][ipri[0]]['units']
+        except:
+            pdb.set_trace()
+    else:
+        units = None
+    iaux = np.nonzero([*map(lambda n: bool(re.match('ADC\d+', n)), ch_names)])[0]
+    if ipri.size == 0 and iaux == 0:
+        return
+    
+    # load raw signals (uV)
+    first,last = pyfx.Edges(continuous.sample_numbers)
+    raw_signal_array = np.array([x*bv for x,bv in zip(continuous.get_samples(0, last-first+1).T, bit_volts)])
+    A,B = ipri[[0,-1]] + [0,1]
+    pri_mx = raw_signal_array[A:B]
+    # look for aux channels
+    if iaux.size > 0:
+        A_AUX, B_AUX = iaux[[0,-1]] + [0,1]
+        aux_mx = raw_signal_array[A_AUX : B_AUX]
+    else: aux_mx = np.array([])
+    
+    return (pri_mx, aux_mx), fs, units
+    
+    #nch = raw_signal_array.shape[0]
+    #node_name = str(meta['recorded_processor']) + str(meta['recorded_processor_id'])
+    
+    # ch_names, units, bitvolts = zip(*[(d['channel_name'], d['units'], 
+    #                                    d['bit_volts']) for d in meta['channels']])
+    
+    # hstg = [(int(a[1:]),b,c) for [(a,b,c),d] in ch_info if d.startswith('Headstage')]
+    # dev_idx, units, bit_volts = map(list, zip(*hstg))
+    # aux = [(int(a[1:]),b,c) for [(a,b,c),d] in ch_info if d.startswith('ADC')]
+    # aux_idx, aux_units, aux_bit_volts = map(list, zip(*aux))
     # collect recording info in dictionary
     # info = pd.Series(dict(raw_data_path = ddir,
     #                       recording_system = 'Open Ephys',
@@ -96,7 +122,7 @@ def load_openephys_data(ddir):
     #                       tstart = tstart,
     #                       tend = tend,
     #                       dur = tend - tstart))
-    return raw_signal_array, fs#, info
+    #return raw_signal_array, fs#, info
 
 
 def load_neuronexus_data(ddir):
@@ -124,19 +150,23 @@ def load_neuronexus_data(ddir):
     nprobes = len(ports)
     probe_nch = [d['num_channels'] for d in ddicts]
     
-    # separate primary vs aux channels
+    # separate primary and aux channels
     ch_names = metadata['sapiens_base']['biointerface_map']['chan_name']
     ipri = np.array([i for i,n in enumerate(ch_names) if n.startswith('pri')])
-    iaux = np.setdiff1d(np.arange(total_channels), ipri)
-    #iaux = np.array([i for i,n in enumerate(ch_names) if n.startswith('aux')])
+    A,B = ipri[[0,-1]] + [0,1]
     
     # load raw probe data
     with open(data_file, 'rb') as fid:
         fid.seek(0, os.SEEK_SET)
         raw_signals = np.fromfile(fid, dtype=np.float32, count=num_samples*total_channels)
-    raw_signal_array = np.reshape(raw_signals, (num_samples, total_channels)).T
-    pri_mx = raw_signal_array[ipri]
-    aux_mx = raw_signal_array[iaux]
+    raw_signal_array = np.reshape(raw_signals, (num_samples, total_channels)).T #[a:b+1]#[ipri]#[0:num_channels]
+    pri_mx = raw_signal_array[A:B]
+    # look for aux channels
+    iaux = np.array([i for i,n in enumerate(ch_names) if n.startswith('aux')])
+    if iaux.size > 0:
+        A_AUX, B_AUX = iaux[[0,-1]] + [0,1]
+        aux_mx = raw_signal_array[A_AUX : B_AUX]
+    else: aux_mx = np.array([])
     
     # collect recording info in dictionary
     # info = pd.Series(dict(raw_data_path = ddir,
@@ -152,7 +182,7 @@ def load_neuronexus_data(ddir):
     #                       tstart = tstart,
     #                       tend = tend,
     #                       dur = tend - tstart))
-    return (pri_mx, aux_mx), fs#, info
+    return (pri_mx, aux_mx), fs, units#, info
 
 
 def load_raw_data(ddir, pprint=True):
@@ -165,15 +195,19 @@ def load_raw_data(ddir, pprint=True):
     # load Open Ephys data
     if 'structure.oebin' in files:
         if pprint: print('Loading Open Ephys raw data ...')
-        (pri_array, aux_array), fs = load_openephys_data(ddir) # removed info, added fs
+        res = load_openephys_data(ddir) # removed info, added fs
+        if not res:
+            msgbox = gi.MsgboxError.run('Unable to load channels from Open Ephys data')
+            return
+        (pri_array, aux_array), fs, units = res
     # load NeuroNexus data
     elif len(xdat_files) > 0:
         if pprint: print('Loading NeuroNexus raw data ...')
-        (pri_array, aux_array), fs = load_neuronexus_data(ddir)
+        (pri_array, aux_array), fs, units = load_neuronexus_data(ddir)
     # no valid raw data found
     else:
         raise Exception(f'No raw Open Ephys (.oebin) or NeuroNexus (.xdat.json) files found in directory "{ddir}"')
-    return (pri_array, aux_array), fs
+    return (pri_array, aux_array), fs, units
     #return signal_array, fs#, info
 
 
@@ -214,8 +248,15 @@ def extract_data(raw_signal_array, idx, fs=30000, lfp_fs=1000, units='uV', lfp_u
 def extract_data_by_probe(raw_signal_array, chMap, fs=30000, lfp_fs=1000, units='uV', lfp_units='mV'):
     """ Get LFP array for each probe represented in $chMap """
     idx_by_probe = get_idx_by_probe(chMap)
-    lfp_list = [extract_data(raw_signal_array, idx, fs=fs, lfp_fs=lfp_fs, 
-                             units=units, lfp_units=lfp_units) for idx in idx_by_probe]
+    ds_factor = int(fs / lfp_fs)  # calculate downsampling factor
+    cf = pq.Quantity(1, units).rescale(lfp_units).magnitude  # uV -> mV conversion factor
+    lfp_list = []
+    for idx in idx_by_probe:
+        lfp = np.array([pyfx.Downsample(raw_signal_array[i], ds_factor)*cf for i in idx])
+        lfp_list.append(lfp)
+        
+    # lfp_list = [extract_data(raw_signal_array, idx, fs=fs, lfp_fs=lfp_fs, 
+    #                          units=units, lfp_units=lfp_units) for idx in idx_by_probe]
     return lfp_list
 
 def process_probe_data(_lfp, lfp_time, lfp_fs, PARAMS, pprint=True):
@@ -279,6 +320,8 @@ def process_all_probes(lfp_list, lfp_time, lfp_fs, PARAMS, save_ddir, pprint=Tru
     ALL_SWR = pd.concat(swr_dfs, keys=range(len(swr_dfs)), ignore_index=False)
     ALL_DS = pd.concat(ds_dfs, keys=range(len(ds_dfs)), ignore_index=False)
     
+    
+    pdb.set_trace()
     # save downsampled data
     if pprint: print('Saving files ...')
     if not os.path.isdir(save_ddir):
@@ -306,8 +349,11 @@ def process_all_probes(lfp_list, lfp_time, lfp_fs, PARAMS, save_ddir, pprint=Tru
     
     
 #%%
-ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/raw_data/'
-        'JG007_2_2024-07-09_15-40-43_openephys/Record Node 103/experiment1/recording1')
+# ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/raw_data/'
+#         'JG007_2_2024-07-09_15-40-43_openephys/Record Node 103/experiment1/recording1')
+
+ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/shank3_saved/'
+        'JG030_het/ALL_DS')
 
     
 # def tmpl_info(lfp_list, lfp_fs, **kwargs):

@@ -8,17 +8,28 @@ Created on Wed Aug  7 13:45:34 2024
 import sys
 import os
 from pathlib import Path
+import shutil
 import matplotlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from PyQt5 import QtWidgets, QtCore
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from PyQt5 import QtWidgets, QtCore, QtGui
 import probeinterface as prif
 from probeinterface.plotting import plot_probe
 import pdb
 # custom modules
 import pyfx
 import ephys
+
+# widget_list = ('QPushButton, QRadioButton, QLabel, QComboBox, QSpinBox, '
+#                'QDoubleSpinBox, QLineEdit, QTextEdit')
+basic_widget_style = ('QPushButton, QRadioButton, QCheckBox, QLabel, QComboBox, '
+                      'QSpinBox, QDoubleSpinBox, QLineEdit, QTextEdit, QAbstractItemView'
+                      '{padding : 2px;}'
+                      'QWidget:focus {outline : none}')
+basic_popup_style = 'QWidget {font-size : 15pt}' #+ basic_widget_style
 
 btn_ss = ('QPushButton {'
           'background-color : rgba%s;'  # light
@@ -46,6 +57,40 @@ btn_ss = ('QPushButton {'
           # 'border-radius : 2px;'
           # '}'
           )
+
+mode_btn_ss = ('QPushButton {'
+               'background-color : whitesmoke;'
+               'border : 3px outset gray;'
+               'border-radius : 2px;'
+               'color : black;'
+               'padding : 4px;'
+               'font-weight : bold;'
+               '}'
+               
+               'QPushButton:pressed {'
+               'background-color : gray;'
+               'border : 3px inset gray;'
+               'color : white;'
+               '}'
+               
+               'QPushButton:checked {'
+               'background-color : darkgray;'
+               'border : 3px inset gray;'
+               'color : black;'
+               '}'
+               
+               'QPushButton:disabled {'
+               'background-color : gainsboro;'
+               'border : 3px outset darkgray;'
+               'color : gray;'
+               '}'
+               
+               'QPushButton:disabled:checked {'
+               'background-color : darkgray;'
+               'border : 3px inset darkgray;'
+               'color : dimgray;'
+               '}'
+               )
 
 def iter2str(v):
     if not hasattr(v, '__iter__'): 
@@ -121,6 +166,8 @@ def info2text(info, rich=True):
     return info_text
 
 
+
+
 def unique_fname(ddir, base_name):
     existing_files = os.listdir(ddir)
     fname = str(base_name)
@@ -142,12 +189,11 @@ class CSlider(matplotlib.widgets.Slider):
         self._handle._markeredgewidth = 2
         self.nsteps = 500
     
-    def key_step(self, event):
-        if event.key == 'right':
+    def key_step(self, x):
+        if x==1:
             self.set_val(self.val + self.nsteps)
-        elif event.key == 'left':
+        elif x==0:
             self.set_val(self.val - self.nsteps)
-        
         
     def enable(self, x):
         if x:
@@ -190,39 +236,18 @@ class EventArrows(QtWidgets.QWidget):
     
     
 class ShowHideBtn(QtWidgets.QPushButton):
-    def __init__(self, text_shown='\u00BB', text_hidden='\u00AB', init_show=False, parent=None):
+    def __init__(self, text_shown='Hide freq. band power', 
+                 text_hidden='Show freq. band power', init_show=False, parent=None):
+        #\u00BB , \u00AB
         super().__init__(parent)
         self.setCheckable(True)
         self.TEXTS = [text_hidden, text_shown]
-        #self.SHOWN_TEXT = text_shown
-        #self.HIDDEN_TEXT = text_hidden
         # set checked/visible or unchecked/hidden
         self.setChecked(init_show)
         self.setText(self.TEXTS[int(init_show)])
         
-        
-        policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred,
-                                        QtWidgets.QSizePolicy.Expanding)
-        self.setSizePolicy(policy)
         self.toggled.connect(self.update_state)
 
-        self.setStyleSheet('QPushButton {'
-                            'background-color : gainsboro;'
-                            'border : 3px outset gray;'
-                            'border-radius : 2px;'
-                            'color : rgb(50,50,50);'
-                            'font-size : 30pt;'
-                            'font-weight : normal;'
-                            'max-width : 30px;'
-                            'padding : 4px;'
-                            '}'
-                            
-                            'QPushButton:pressed {'
-                            'background-color : dimgray;'
-                            'border : 3px inset gray;'
-                            'color : whitesmoke;'
-                            '}')
-        
     def update_state(self, show):
         self.setText(self.TEXTS[int(show)])
 
@@ -243,6 +268,332 @@ class ReverseSpinBox(QtWidgets.QSpinBox):
         return super().stepBy(-steps)
 
 
+class LabeledWidget(QtWidgets.QWidget):
+    def __init__(self, widget=QtWidgets.QWidget, txt='', orientation='v', 
+                 label_pos=0, **kwargs):
+        super().__init__()
+        assert orientation in ['h','v'] and label_pos in [0,1]
+        self.setContentsMargins(0,0,0,0)
+        if orientation == 'h': 
+            self.layout = QtWidgets.QHBoxLayout(self)
+        else: 
+            self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(0,0,0,0)
+        self.layout.setSpacing(kwargs.get('spacing', 1))
+        self.label = QtWidgets.QLabel(txt)
+        self.qw = widget()
+        self.layout.addWidget(self.qw, stretch=2)
+        self.layout.insertWidget(label_pos, self.label, stretch=0)
+    
+    def text(self):
+        return self.label.text()
+    
+    def setText(self, txt):
+        self.label.setText(txt)
+        
+class LabeledSpinbox(LabeledWidget):
+    def __init__(self, txt='', double=False, **kwargs):
+        widget = QtWidgets.QDoubleSpinBox if double else QtWidgets.QSpinBox
+        super().__init__(widget, txt, **kwargs)
+        if 'suffix' in kwargs: self.qw.setSuffix(kwargs['suffix'])
+        if 'minimum' in kwargs: self.qw.setMinimum(kwargs['minimum'])
+        if 'maximum' in kwargs: self.qw.setMaximum(kwargs['maximum'])
+        if 'range' in kwargs: self.qw.setRange(*kwargs['range'])
+        if 'decimals' in kwargs: self.qw.setDecimals(kwargs['decimals'])
+    
+    def value(self):
+        return self.qw.value()
+    
+    def setValue(self, val):
+        self.qw.setValue(val)
+
+
+class LabeledCombobox(LabeledWidget):
+    def __init__(self, txt='', **kwargs):
+        super().__init__(QtWidgets.QComboBox, txt, **kwargs)
+    
+    def addItems(self, items):
+        return self.qw.addItems(items)
+    
+    def currentText(self): 
+        return self.qw.currentText()
+    
+    def currentIndex(self):
+        return self.qw.currentIndex()
+    
+    def setCurrentText(self, txt):
+        self.qw.setCurrentText(txt)
+    
+    def setCurrentIndex(self, idx):
+        self.qw.setCurrentIndex(idx)
+
+
+class LabeledPushbutton(LabeledWidget):
+    def __init__(self, txt='', orientation='h', label_pos=1, spacing=10, **kwargs):
+        super().__init__(QtWidgets.QPushButton, txt, orientation, label_pos, spacing=spacing, **kwargs)
+        if 'btn_txt' in kwargs: self.qw.setText(kwargs['btn_txt'])
+        if 'icon' in kwargs: self.qw.setIcon(kwargs['icon'])
+        if 'icon_size' in kwargs: self.qw.setIconSize(QtCore.QSize(kwargs['icon_size']))
+        if 'ss' in kwargs: self.qw.setStyleSheet(kwargs['ss'])
+    
+    def isChecked(self):
+        return self.qw.isChecked()
+    
+    def setCheckable(self, x):
+        self.qw.setCheckable(x)
+
+
+class SpinboxRange(QtWidgets.QWidget):
+    def __init__(self, double=False, parent=None, **kwargs):
+        super().__init__(parent)
+        if double:
+            self.box0 = QtWidgets.QDoubleSpinBox()
+            self.box1 = QtWidgets.QDoubleSpinBox()
+        else:
+            self.box0 = QtWidgets.QSpinBox()
+            self.box1 = QtWidgets.QSpinBox()
+        for box in [self.box0, self.box1]:
+            if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
+            if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
+            if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
+            if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
+            
+        self.dash = QtWidgets.QLabel(' — ')
+        self.dash.setAlignment(QtCore.Qt.AlignCenter)
+        
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(0,0,0,0)
+        self.layout.setSpacing(0)
+        self.layout.addWidget(self.box0)
+        self.layout.addWidget(self.dash)
+        self.layout.addWidget(self.box1)
+    
+    def get_values(self):
+        return [self.box0.value(), self.box1.value()]
+
+
+class QEdit_HBox(QtWidgets.QHBoxLayout):
+    def __init__(self, simple=False, colors=['gray','darkgreen'], parent=None):
+        super().__init__(parent)
+        self.simple_mode = simple
+        self.c0, self.c1 = colors
+        
+        self.setContentsMargins(0,0,0,0)
+        self.setSpacing(0)
+        
+        # ellipsis (...)
+        self.ellipsis = QtWidgets.QLineEdit()
+        self.ellipsis.setAlignment(QtCore.Qt.AlignCenter)
+        self.ellipsis.setTextMargins(0,4,0,4)
+        self.ellipsis.setReadOnly(True)
+        self.ellipsis.setText('...')
+        self.ellipsis.setMaximumWidth(20)
+        # base path to directory (resizable)
+        self.path = QtWidgets.QLineEdit()
+        self.path.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.path.setTextMargins(0,4,0,4)
+        self.path.setReadOnly(True)
+        policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                                        QtWidgets.QSizePolicy.Fixed)
+        self.path.setSizePolicy(policy)
+        # directory name (gets size priority according to text length)
+        self.folder = QtWidgets.QLineEdit()
+        self.folder.setTextMargins(0,4,0,4)
+        self.folder.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        self.folder.setReadOnly(True)
+        policy2 = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                                        QtWidgets.QSizePolicy.Fixed)
+        self.folder.setSizePolicy(policy2)
+        # set attributes for all QLineEdit items
+        self.qedits = [self.ellipsis, self.path, self.folder]
+        ss = ('QLineEdit {'
+              f'border : 2px groove {self.c0};'
+              'border-left : %s;'
+              'border-right : %s;'
+              'font-weight : %s;'
+              'padding : 0px;}'
+              
+              'QLineEdit:disabled {'
+              'border-color : gainsboro;}'
+              )
+        self.ellipsis.setStyleSheet(ss % (f'2px groove {self.c0}', 'none', 'normal'))
+        self.folder.setStyleSheet(ss % ('none', f'2px groove {self.c0}', 'bold'))
+        if self.simple_mode:
+            self.path.setStyleSheet(ss % (f'2px groove {self.c0}', f'2px groove {self.c0}', 'normal'))
+        else:
+            self.path.setStyleSheet(ss % ('none', 'none', 'normal'))
+        
+        self.addWidget(self.path)
+        if not self.simple_mode:
+            self.insertWidget(0, self.ellipsis)
+            self.addWidget(self.folder)
+    
+    
+    def update_qedit(self, ddir, x=False):
+        # update QLineEdit text
+        if self.simple_mode:
+            self.path.setText(ddir)
+            return
+        
+        dirs = ddir.split(os.sep)
+        folder_txt = dirs.pop(-1)
+        path_txt = os.sep.join(dirs) + os.sep
+        self.qedits[1].setText(path_txt)
+        self.qedits[2].setText(folder_txt)
+        fm = self.qedits[2].fontMetrics()
+        width = fm.horizontalAdvance(folder_txt) + int(fm.maxWidth()/2)
+        self.qedits[2].setFixedWidth(width)
+        
+        c0, c1 = [self.c0, self.c1] if x else [self.c1, self.c0]
+        for qedit in self.qedits:
+            qedit.setStyleSheet(qedit.styleSheet().replace(c0, c1))
+            
+
+class StatusIcon(QtWidgets.QPushButton):
+    def __init__(self, init_state=0):
+        super().__init__()
+        self.icons = [QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogNoButton),
+                      QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogYesButton)]
+        self.new_status(init_state)
+        self.setStyleSheet('QPushButton,'
+                            'QPushButton:default,'
+                            'QPushButton:hover,'
+                            'QPushButton:selected,'
+                            'QPushButton:disabled,'
+                            'QPushButton:pressed {'
+                            'background-color: none;'
+                               'border: none;'
+                               'color: none;}')
+    def new_status(self, x):
+        self.setIcon(self.icons[int(x)])  # status icon
+        
+
+class AnalysisBtns(QtWidgets.QWidget):
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # View/save event channels; always available for all processed data folders
+        self.option1_widget = self.create_widget('Select event channels', 'green')
+        self.option1_btn = self.option1_widget.findChild(QtWidgets.QPushButton)
+        # Classify dentate spikes; requires event channels and probe DS_DF files
+        self.option2_widget = self.create_widget('Classify dentate spikes', 'blue')
+        self.option2_btn = self.option2_widget.findChild(QtWidgets.QPushButton)
+        
+        #self.btn_grp.addButton(self.option1_btn)
+        #self.btn_grp.addButton(self.option2_btn)
+        self.option1_widget.setEnabled(False)
+        self.option2_widget.setEnabled(False)
+        
+        #self.btn_grp.buttonToggled.connect(self.action_toggled)
+    
+    def create_widget(self, txt, c):
+        widget = QtWidgets.QWidget()
+        widget.setContentsMargins(0,0,0,0)
+        hlay = QtWidgets.QHBoxLayout(widget)
+        hlay.setContentsMargins(0,0,0,0)
+        hlay.setSpacing(8)
+        btn = QtWidgets.QPushButton()
+        #btn.setCheckable(True)
+        #clight = pyfx.hue(c, 0.7, 1); cdark = pyfx.hue(c, 0.4, 0)#; cdull = pyfx.hue(clight, 0.8, 0.5, alpha=0.5)
+        btn.setStyleSheet(btn_ss % (pyfx.hue(c, 0.7, 1),  pyfx.hue(c, 0.4, 0)))
+        lbl = QtWidgets.QLabel(txt)
+        hlay.addWidget(btn)
+        hlay.addWidget(lbl)
+        #self.btn_grp.addButton(btn)
+        return widget
+        
+    
+    def ddir_toggled(self, ddir, probe_idx=0):
+        self.option1_widget.setEnabled(False)
+        self.option2_widget.setEnabled(False)
+        
+        if not os.path.isdir(ddir):
+            return
+        
+        files = os.listdir(ddir)
+        # required: basic LFP files
+        if all([bool(f in files) for f in ['lfp_bp.npz', 'lfp_time.npy', 'lfp_fs.npy']]):
+            self.option1_widget.setEnabled(True)  # req: basic LFP data
+        
+        # required: event channels file, DS_DF file for current probe
+        if f'DS_DF_{probe_idx}' in files and f'theta_ripple_hil_chan_{probe_idx}.npy' in files:
+            self.option2_widget.setEnabled(True)
+
+
+class TableWidget(QtWidgets.QTableWidget):
+    def __init__(self, df, parent=None):
+        super().__init__(parent)
+        self.load_df(df)
+        self.verticalHeader().hide()
+        
+        self.itemChanged.connect(self.print_update)
+    
+    def print_update(self, item):
+        print('itemChanged')
+        self.df.iloc[item.row(), item.column()] = int(item.text())
+        
+    
+    def init_table(self, selected_columns = []):
+        nRows = len(self.df.index)
+        nColumns = len(selected_columns) or len(self.df.columns)
+        self.setRowCount(nRows)
+        self.setColumnCount(nColumns)
+
+        self.setHorizontalHeaderLabels(selected_columns or self.df.columns)
+        self.setVerticalHeaderLabels(self.df.index.astype(str))
+        
+        # Display an empty table
+        if self.df.empty:
+            self.clearContents()
+            return
+
+        for row in range(self.rowCount()):
+            for col in range(self.columnCount()):
+                item = QtWidgets.QTableWidgetItem(str(self.df.iat[row, col]))
+                self.setItem(row, col, item)
+        # Enable sorting on the table
+        self.setSortingEnabled(True)
+        # Enable column moving by drag and drop
+        self.horizontalHeader().setSectionsMovable(True)
+    
+    def load_df(self, df, selected_columns = []):
+        self.df = df
+        self.init_table(selected_columns)
+
+
+class TTabWidget(QtWidgets.QTabWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.currentChanged.connect(self.updateGeometry)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def sizeHint(self):
+        lc = QtCore.QSize(0, 0)
+        rc = QtCore.QSize(0, 0)
+        opt = QtWidgets.QStyleOptionTabWidgetFrame()
+        self.initStyleOption(opt)
+        if self.cornerWidget(QtCore.Qt.TopLeftCorner):
+            lc = self.cornerWidget(QtCore.Qt.TopLeftCorner).sizeHint()
+        if self.cornerWidget(QtCore.Qt.TopRightCorner):
+            rc = self.cornerWidget(QtCore.Qt.TopRightCorner).sizeHint()
+        layout = self.findChild(QtWidgets.QStackedLayout)
+        layoutHint = layout.currentWidget().sizeHint()
+        tabHint = self.tabBar().sizeHint()
+        if self.tabPosition() in (self.North, self.South):
+            size = QtCore.QSize(
+                max(layoutHint.width(), tabHint.width() + rc.width() + lc.width()), 
+                layoutHint.height() + max(rc.height(), max(lc.height(), tabHint.height()))
+            )
+        else:
+            size = QtCore.QSize(
+                layoutHint.width() + max(rc.width(), max(lc.width(), tabHint.width())), 
+                max(layoutHint.height(), tabHint.height() + rc.height() + lc.height())
+            )
+        return size
+
+
 class Msgbox(QtWidgets.QMessageBox):
     def __init__(self, msg='', sub_msg='', title='', parent=None):
         super().__init__(parent)
@@ -254,13 +605,24 @@ class Msgbox(QtWidgets.QMessageBox):
         self.label = self.findChild(QtWidgets.QLabel, 'qt_msgbox_label')
         self.label.setAlignment(QtCore.Qt.AlignCenter)
         # set sub text
-        if sub_msg != '':
-            self.setInformativeText(sub_msg)
-            self.sub_label = self.findChild(QtWidgets.QLabel, 'qt_msgbox_informativelabel')
-            
+        self.setInformativeText('tmp')  # make sure label shows up in widget children 
+        self.setInformativeText(sub_msg)
+        self.sub_label = self.findChild(QtWidgets.QLabel, 'qt_msgbox_informativelabel')
+        # locate button box
+        self.bbox = self.findChild(QtWidgets.QDialogButtonBox, 'qt_msgbox_buttonbox')
+        
+    @classmethod
+    def run(cls, *args, **kwargs):
+        pyfx.qapp()
+        msgbox = cls(*args, **kwargs)
+        msgbox.show()
+        msgbox.raise_()
+        res = msgbox.exec()
+        return res
+    
     
 class MsgboxSave(Msgbox):
-    def __init__(self, msg='Save successful!', sub_msg='Exit window?', title='', parent=None):
+    def __init__(self, msg='Save successful!', sub_msg='', title='', parent=None):
         super().__init__(msg, sub_msg, title, parent)
         # pop-up messagebox appears when save is complete
         self.setIcon(QtWidgets.QMessageBox.Information)
@@ -272,11 +634,83 @@ class MsgboxSave(Msgbox):
 
 
 class MsgboxError(Msgbox):
-    def __init__(self, msg='Something went wrong!', sub_msg='', title='', parent=None):
+    def __init__(self, msg='Something went wrong!', sub_msg='', title='', 
+                 invalid_probe='', parent=None):
         super().__init__(msg, sub_msg, title, parent)
         # pop-up messagebox appears when save is complete
         self.setIcon(QtWidgets.QMessageBox.Critical)
         self.setStandardButtons(QtWidgets.QMessageBox.Close)
+        if invalid_probe:
+            self.invalid_probe_file(invalid_probe)
+            
+    def invalid_probe_file(self, f):
+        self.setText('The following is not a valid probe file:')
+        self.setInformativeText(f'<nobr><code>{f}</code></nobr>')
+        self.sub_label.setWordWrap(False)
+
+
+class MsgboxWarning(Msgbox):
+    def __init__(self, msg='Warning!', sub_msg='', title='', parent=None):
+        super().__init__(msg, sub_msg, title, parent)
+        self.setIcon(QtWidgets.QMessageBox.Warning)
+        self.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        
+    def set_overwrite_mode(self, ppath):
+        # overwrite items in directory
+        if os.path.isdir(ppath) and len(os.listdir(ppath)) > 0:
+            n = len(os.listdir(ppath))
+            self.setText(f'The directory <code>{os.path.basename(ppath)}</code> contains '
+                         f'<code>{n}</code> items.')#'<br><br>Overwrite existing files?')
+            self.setInformativeText('Overwrite existing files?')
+            self.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel
+                                    | QtWidgets.QMessageBox.Apply)
+            merge_btn = self.button(QtWidgets.QMessageBox.Apply)
+            merge_btn.setText(merge_btn.text().replace('Apply','Merge'))
+        # overwrite file
+        elif os.path.isfile(ppath):
+            self.setText(f'The file <code>{os.path.basename(ppath)}</code> already exists.')
+            self.setInformativeText('Do you want to replace it?')
+            self.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel)
+        else:
+            return False
+        # rename "Yes" button to "Overwrite" response buttons
+        yes_btn = self.button(QtWidgets.QMessageBox.Yes)
+        yes_btn.setText(yes_btn.text().replace('Yes','Overwrite'))
+        return True
+    
+    
+    @classmethod
+    def unsaved_changes_warning(cls, msg='Unsaved changes', sub_msg='Do you want to save your work?', parent=None):
+        msgbox = cls(msg, sub_msg, parent=parent)
+        msgbox.setStandardButtons(QtWidgets.QMessageBox.Cancel | QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard)
+        msgbox.show()
+        msgbox.raise_()
+        res = msgbox.exec()
+        if res == QtWidgets.QMessageBox.Discard:
+            return True   # don't worry about changes
+        elif res == QtWidgets.QMessageBox.Cancel:
+            return False  # abort close attempt
+        elif res == QtWidgets.QMessageBox.Save:
+            return -1     # save changes and then close
+        
+        
+    @classmethod
+    def overwrite_warning(cls, ppath, parent=None):
+        msgbox = cls(parent=parent)
+        is_ovr = msgbox.set_overwrite_mode(ppath)
+        if is_ovr==False: 
+            return True  # fake news, no overwrite
+        msgbox.show()
+        msgbox.raise_()
+        res = msgbox.exec()
+        if res == QtWidgets.QMessageBox.Yes: 
+            if os.path.isdir(ppath):
+                shutil.rmtree(ppath)  # delete any existing directory files
+                os.makedirs(ppath)
+            return True  # continue overwriting
+        elif res == QtWidgets.QMessageBox.Apply:
+            return True   # add new files to the existing directory contents
+        else: return False  # abort save attempt
         
         
 class AuxDialog(QtWidgets.QDialog):
@@ -345,29 +779,64 @@ class AuxDialog(QtWidgets.QDialog):
             
 
 class FileDialog(QtWidgets.QFileDialog):
+    array_exts = ['.npy', '.mat']#, '.csv']
+    probe_exts = ['.json', '.prb', '.mat']
     
     def __init__(self, init_ddir='', load_or_save='load', overwrite_mode=0, 
-                 is_directory=True, parent=None):
+                 is_directory=True, is_probe=False, is_array=False, parent=None, **kwargs):
+        """
+        init_ddir: optional starting directory
+        load_or_save: "load" in existing directory/file or "save" new one (not recommended)
+        is_directory: allow selection of all files (False) or only directories (True)
+        is_probe: add filter for valid probe filetypes
+        """
         super().__init__(parent)
         self.load_or_save = load_or_save
         self.overwrite_mode = overwrite_mode  # 0=add to folder, 1=overwrite files
+        self.probe_exts = kwargs.get('probe_exts', self.probe_exts)
+        self.array_exts = kwargs.get('array_exts', self.array_exts)
+        
         options = self.Options()
         options |= self.DontUseNativeDialog
         
         self.setViewMode(self.List)
         self.setAcceptMode(self.AcceptOpen)  # open file
+        
+        # filter for array/probe files
+        fx = lambda llist: ' '.join([*map(lambda x: '*'+x, llist)])
+        if is_probe or is_array:
+            is_directory = False
+            if is_probe:
+                ffilter = f'Probe files ({fx(self.probe_exts)})'  #f"Probe files ({' '.join([*map(lambda x: '*'+x, self.probe_exts)])})"
+            else:
+                ffilter = f'Data files ({fx(self.array_exts)})'
+            self.setNameFilter(ffilter)
+            if self.load_or_save=='save': 
+                self.setAcceptMode(self.AcceptSave)
+            
+        # allow directories only
         if is_directory:
-            self.setFileMode(self.Directory)     # allow directories only
+            self.setFileMode(self.Directory)
         else:
-            self.setFileMode(self.ExistingFile)  # allow existing files
+            if self.load_or_save == 'load':
+                self.setFileMode(self.ExistingFile)  # allow existing files
+            else:
+                self.setFileMode(self.AnyFile)       # allow any file name
         
         try: self.setDirectory(init_ddir)
         except: print('init_ddir argument in FileDialog is invalid')
         self.setOptions(options)
         self.connect_signals()
+        
+        # if is_probe and self.load_or_save == 'save':
+        #     print('hi')
+            
+        #     self.fx = lambda txt: any(map(lambda ext: txt.endswith(ext), self.probe_exts))
+        #     self.lineEdit.textChanged.connect(lambda txt: self.btn.setEnabled(self.fx(txt)))
     
     
     def connect_signals(self):
+        self.btn = self.findChild(QtWidgets.QPushButton)
         self.lineEdit = self.findChild(QtWidgets.QLineEdit)
         self.stackedWidget = self.findChild(QtWidgets.QStackedWidget)
         self.view = self.stackedWidget.findChild(QtWidgets.QListView)
@@ -381,341 +850,149 @@ class FileDialog(QtWidgets.QFileDialog):
         txt = self.view.selectionModel().currentIndex().data()
         self.lineEdit.setText(txt)
     
+    @classmethod
+    def load_array_file(cls, init_ddir=ephys.base_dirs()[0], parent=None, **kwargs):
+        pyfx.qapp()
+        dlg = cls(init_ddir=init_ddir, is_array=True, parent=parent, **kwargs)
+        dlg.show()
+        dlg.raise_()
+        res = dlg.exec()
+        if not res: return
+        
+        # get filepath, try loading data
+        fpath = dlg.selectedFiles()[0]
+        data = ephys.read_array_file(fpath)
+        if data is None:
+            msgbox = MsgboxError('The following is not a valid array:',
+                                 sub_msg=f'<nobr><code>{fpath}</code></nobr>')
+            msgbox.sub_label.setWordWrap(False)
+            msgbox.exec()
+            return
+        return (data, fpath)
+        
+        
+    @classmethod
+    def load_probe_file(cls, init_ddir=ephys.base_dirs()[2], parent=None, **kwargs):
+        pyfx.qapp()
+        # run file dialog with probe file settings
+        dlg = cls(init_ddir, is_probe=True, parent=parent, **kwargs)
+        dlg.show()
+        dlg.raise_()
+        res = dlg.exec()
+        if not res: return
+        # get filepath, try loading probe object
+        fpath = dlg.selectedFiles()[0]
+        probe = ephys.read_probe_file(fpath)
+        if probe is None:
+            msgbox = MsgboxError(invalid_probe=fpath)
+            msgbox.exec()
+            return
+        return probe
     
-    def overwrite_msgbox(self, ddir):
-        txt = (f'The directory <code>{ddir.split(os.sep)[-1]}</code> contains '
-               f'<code>{len(os.listdir(ddir))}</code> items.<br><br>Overwrite existing files?')
-        msg = '<center>{}</center>'.format(txt)
-        res = QtWidgets.QMessageBox.warning(self, 'Overwrite Warning', msg, 
-                                            QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No)
-        if res == QtWidgets.QMessageBox.Yes:
-            return True
+    @classmethod
+    def save_probe_file(cls, probe, init_ddir=ephys.base_dirs()[2], parent=None, **kwargs):
+        pyfx.qapp()
+        # 
+        init_fname = f'{probe.name}_config.json'
+        dlg = cls(init_ddir, is_probe=True, load_or_save='save', parent=parent, **kwargs)
+        # add validator for supported file extensions
+        dlg.fx = lambda txt: any(map(lambda ext: txt.endswith(ext), dlg.probe_exts))
+        dlg.lineEdit.textChanged.connect(lambda txt: dlg.btn.setEnabled(dlg.fx(txt)))
+        dlg.lineEdit.setText(init_fname)
+        dlg.show()
+        dlg.raise_()
+        res = dlg.exec()
+        if res:
+            # write probe file to selected location
+            fpath = dlg.selectedFiles()[0]
+            res = ephys.write_probe_file(probe, fpath)
+            if res:
+                print('Probe saved!')
+            return res
         return False
+        # # probe filename convention: [PROBE NAME]_config.[VALID EXTENSION]
+        # extension = self.save_exts.currentText()
+        # filename = f'{self.probe.name}_config{extension}'
+        # fpath = str(Path(ephys.base_dirs()[2], filename))
+        # if os.path.exists(fpath):
+        #     msgbox = gi.MsgboxWarning(overwrite_file=fpath)
+        #     res = msgbox.exec()
+        #     if res != QtWidgets.QMessageBox.Yes:
+        #         return
+        # # save probe file in desired file format
+        # res = ephys.write_probe_file(self.probe, fpath)
+        # if res:
+        #     msgbox = gi.MsgboxSave('Probe saved!<br>Exit window?', parent=self)
+        #     res = msgbox.exec()
+        #     if res == QtWidgets.QMessageBox.Yes:
+        #         self.accept()
+        # self.saveAction.setEnabled(False)
+        # self.save_exts.setEnabled(False)
         
     
     def accept(self):
-        ddir = self.directory().path()
-        if self.load_or_save == 'save' and len(os.listdir(ddir)) > 0:
-            # show overwrite warning for existing directory files
-            res = self.overwrite_msgbox(ddir)
+        if self.load_or_save == 'save':
+            ddir = self.directory().path()
+            if self.fileMode()==self.Directory and len(os.listdir(ddir))>0:
+                res = MsgboxWarning.overwrite_warning(ddir, parent=self)
+                # if res:
+                #     shutil.rmtree(self.processed_ddir)
+            else:
+                res = MsgboxWarning.overwrite_warning(self.selectedFiles()[0], parent=self)
             if not res: return
         QtWidgets.QDialog.accept(self)
     
     
-    
-class QEdit_HBox(QtWidgets.QHBoxLayout):
-    def __init__(self, simple=False, colors=['gray','darkgreen'], parent=None):
+
+
+class Popup(QtWidgets.QDialog):
+    """ Simple popup window to display any widget(s) """
+    def __init__(self, widgets=[], orientation='v', title='', parent=None):
         super().__init__(parent)
-        self.simple_mode = simple
-        self.c0, self.c1 = colors
+        self.setWindowTitle(title)
+        if orientation   == 'v': self.layout = QtWidgets.QVBoxLayout(self)
+        elif orientation == 'h': self.layout = QtWidgets.QHBoxLayout(self)
+        for widget in widgets:
+            self.layout.addWidget(widget)
         
-        self.setContentsMargins(0,0,0,0)
-        self.setSpacing(0)
         
-        # ellipsis (...)
-        self.ellipsis = QtWidgets.QLineEdit()
-        self.ellipsis.setAlignment(QtCore.Qt.AlignCenter)
-        self.ellipsis.setTextMargins(0,4,0,4)
-        self.ellipsis.setReadOnly(True)
-        self.ellipsis.setText('...')
-        self.ellipsis.setMaximumWidth(20)
-        # base path to directory (resizable)
-        self.path = QtWidgets.QLineEdit()
-        self.path.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        self.path.setTextMargins(0,4,0,4)
-        self.path.setReadOnly(True)
-        policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Ignored,
-                                        QtWidgets.QSizePolicy.Fixed)
-        self.path.setSizePolicy(policy)
-        # directory name (gets size priority according to text length)
-        self.folder = QtWidgets.QLineEdit()
-        self.folder.setTextMargins(0,4,0,4)
-        self.folder.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
-        self.folder.setReadOnly(True)
-        policy2 = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed,
-                                        QtWidgets.QSizePolicy.Fixed)
-        self.folder.setSizePolicy(policy2)
-        # set attributes for all QLineEdit items
-        self.qedits = [self.ellipsis, self.path, self.folder]
-        ss = ('QLineEdit {'
-              f'border : 2px groove {self.c0};'
-              'border-left : %s;'
-              'border-right : %s;'
-              'font-weight : %s;'
-              'padding : 0px;}')
-        self.ellipsis.setStyleSheet(ss % (f'2px groove {self.c0}', 'none', 'normal'))
-        self.folder.setStyleSheet(ss % ('none', f'2px groove {self.c0}', 'bold'))
-        if self.simple_mode:
-            self.path.setStyleSheet(ss % (f'2px groove {self.c0}', f'2px groove {self.c0}', 'normal'))
-        else:
-            self.path.setStyleSheet(ss % ('none', 'none', 'normal'))
-        
-        self.addWidget(self.path)
-        if not self.simple_mode:
-            self.insertWidget(0, self.ellipsis)
-            self.addWidget(self.folder)
-    
-    
-    def update_qedit(self, ddir, x=False):
-        # update QLineEdit text
-        if self.simple_mode:
-            self.path.setText(ddir)
-            return
-        
-        dirs = ddir.split(os.sep)
-        folder_txt = dirs.pop(-1)
-        path_txt = os.sep.join(dirs) + os.sep
-        self.qedits[1].setText(path_txt)
-        self.qedits[2].setText(folder_txt)
-        fm = self.qedits[2].fontMetrics()
-        width = fm.horizontalAdvance(folder_txt) + int(fm.maxWidth()/2)
-        self.qedits[2].setFixedWidth(width)
-        
-        c0, c1 = [self.c0, self.c1] if x else [self.c1, self.c0]
-        for qedit in self.qedits:
-            qedit.setStyleSheet(qedit.styleSheet().replace(c0, c1))
-            
-
-class StatusIcon(QtWidgets.QPushButton):
-    def __init__(self, init_state=0):
-        super().__init__()
-        self.icons = [QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogNoButton),
-                      QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogYesButton)]
-        self.new_status(init_state)
-        self.setStyleSheet('QPushButton,'
-                            'QPushButton:default,'
-                            'QPushButton:hover,'
-                            'QPushButton:selected,'
-                            'QPushButton:disabled,'
-                            'QPushButton:pressed {'
-                            'background-color: none;'
-                               'border: none;'
-                               'color: none;}')
-    def new_status(self, x):
-        self.setIcon(self.icons[int(x)])  # status icon
+    def center_window(self):
+        qrect = self.frameGeometry()  # proxy rectangle for window with frame
+        screen_rect = pyfx.ScreenRect()
+        qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
+        self.move(qrect.topLeft())
         
 
 
-class RawArrayLoader(QtWidgets.QDialog):
-    def __init__(self, data, parent=None):
-        super().__init__(parent)
-        self.data = data
-        
-        self.gen_layout()
-        
-        self.fs_val.setValue(1000)
-    
-    def gen_layout(self):
-        self.layout = QtWidgets.QVBoxLayout(self)
-        
-        self.dims_gbox = QtWidgets.QGroupBox('Data Array')
-        grid = QtWidgets.QGridLayout(self.dims_gbox)
-        nrows, ncols = self.data.shape
-        #rows_hbox = QtWidgets.QHBoxLayout()
-        self.bgrp = QtWidgets.QButtonGroup()
-        self.bgrp.setExclusive(False)
-        nrows_lbl = QtWidgets.QLabel(f'<b>{nrows}</b>')
-        nrows_lbl.setAlignment(QtCore.Qt.AlignCenter)
-        rows_lbl = QtWidgets.QLabel('rows')
-        self.rows_bgrp = QtWidgets.QButtonGroup()
-        rows_ch_radio = QtWidgets.QRadioButton('Channels')
-        rows_t_radio = QtWidgets.QRadioButton('Timepoints')
-        #self.rows_bgrp.addButton(rows_ch_radio, 0)
-        #self.rows_bgrp.addButton(rows_t_radio, 1)
-        #rows_hbox.addWidget(rows_lbl)
-        #cols_hbox = QtWidgets.QHBoxLayout()
-        ncols_lbl = QtWidgets.QLabel(f'<b>{ncols}</b>')
-        ncols_lbl.setAlignment(QtCore.Qt.AlignCenter)
-        cols_lbl = QtWidgets.QLabel('columns')
-        self.cols_bgrp = QtWidgets.QButtonGroup()
-        cols_ch_radio = QtWidgets.QRadioButton('Channels')
-        cols_t_radio = QtWidgets.QRadioButton('Timepoints')
-        #self.cols_bgrp.addButton(cols_ch_radio, 0)
-        #self.cols_bgrp.addButton(cols_t_radio, 1)
-        self.bgrp.addButton(rows_ch_radio, 0)
-        self.bgrp.addButton(rows_t_radio, 1)
-        self.bgrp.addButton(cols_ch_radio, 2)
-        self.bgrp.addButton(cols_t_radio, 3)
-        #cols_hbox.addWidget(cols_lbl)
-        if nrows > ncols:
-            rows_t_radio.setChecked(True)
-            cols_ch_radio.setChecked(True)
-            self.data = np.array(self.data.T)
-        else:
-            rows_ch_radio.setChecked(True)
-            cols_t_radio.setChecked(True)
-        
-        line0 = pyfx.DividerLine(orientation='v')
-        line1 = pyfx.DividerLine(orientation='v')
-        hline = pyfx.DividerLine(lw=1, mlw=1)
-        grid.addWidget(nrows_lbl,     0, 0)
-        grid.addWidget(rows_lbl,      0, 1)
-        grid.addWidget(line0,         0, 2)
-        grid.addWidget(rows_ch_radio, 0, 3)
-        grid.addWidget(rows_t_radio,  0, 4)
-        grid.addWidget(hline,         1, 0, 1, 5)
-        grid.addWidget(ncols_lbl,     2, 0)
-        grid.addWidget(cols_lbl,      2, 1)
-        grid.addWidget(line1,         2, 2)
-        grid.addWidget(cols_ch_radio, 2, 3)
-        grid.addWidget(cols_t_radio,  2, 4)
-        
-        self.fs_gbox = QtWidgets.QGroupBox('Sampling Rate')
-        fs_lay = QtWidgets.QHBoxLayout(self.fs_gbox)
-        fs_lbl = QtWidgets.QLabel('fs:')
-        self.fs_val = QtWidgets.QDoubleSpinBox()
-        self.fs_val.setRange(1, 9999999999)
-        self.fs_val.setSuffix(' Hz')
-        fs_line = pyfx.DividerLine(orientation='v')
-        dur_lbl = QtWidgets.QLabel('Duration:')
-        self.dur_val = QtWidgets.QDoubleSpinBox()
-        self.dur_val.setRange(1, 9999999999)
-        self.dur_val.setDecimals(4)
-        self.dur_val.setSuffix(' s')
-        self.dur_val.setEnabled(False)
-        fs_lay.addWidget(fs_lbl)
-        fs_lay.addWidget(self.fs_val)
-        #fs_lay.addWidget(fs_line)
-        fs_lay.addSpacing(25)
-        fs_lay.addWidget(dur_lbl)
-        fs_lay.addWidget(self.dur_val)
-        
-        
-        
-        
-        
-        
-        #self.layout.addLayout(rows_hbox)
-        #self.layout.addLayout(cols_hbox)
-        self.layout.addWidget(self.dims_gbox)
-        self.layout.addWidget(self.fs_gbox)
-        
-        self.bgrp.buttonToggled.connect(self.label_dims)
-        self.fs_val.valueChanged.connect(lambda x: self.update_fs_dur(x, mode=0))
-        self.dur_val.valueChanged.connect(lambda x: self.update_fs_dur(x, mode=1))
-        #self.rows_bgrp.buttonToggled.connect(self.label_dims)
-        #self.cols_bgrp.buttonToggled.connect(self.label_dims)
-        # list of valid file extensions
-        # self.ext_gbox = QtWidgets.QGroupBox('Select file type')
-        # ext_vlay = QtWidgets.QVBoxLayout(self.ext_gbox)
-        # self.ext_bgrp = QtWidgets.QButtonGroup()
-        # extensions = ['.npy', '.mat', '.csv']
-        # for i,ext in enumerate(extensions):
-        #     btn = QtWidgets.QRadioButton(ext)
-        #     if i==0:
-        #         btn.setChecked(True)
-        #     ext_vlay.addWidget(btn)
-        #     self.ext_bgrp.addButton(btn)
-        # self.layout.addWidget(self.ext_gbox)
-    
-    def update_fs_dur(self, val, mode):
-        nts = self.data.shape[int(self.bgrp.buttons()[3].isChecked())]
-        print(nts)
-        if mode == 0:  # calculate recording duration from sampling rate
-            dur = nts / self.fs_val.value()
-            self.dur_val.setValue(dur)
-        elif mode == 1:
-            fs = nts / self.dur_val.value()
-            self.fs_val.setValue(fs)
-            
-        
-        
-    def label_dims(self, btn, chk):
-        if not chk: return
-        if self.bgrp.checkedId()   in [0,3] : chks = [True, False, False, True]
-        elif self.bgrp.checkedId() in [1,2] : chks = [False, True, True, False]
-        self.bgrp.blockSignals(True)
-        for b,x in zip(self.bgrp.buttons(), chks):
-            b.setChecked(x)
-        self.bgrp.blockSignals(False)
-        #if self.bgrp.
-        # bgrp = [self.rows_bgrp, self.cols_bgrp][int(btn in self.rows_bgrp.buttons())]
-        # print('blocking signals')
-        # #bgrp.blockSignals(True)
-        # print('reversing checks')
-        # bgrp.blockSignals(True)
-        # for b in bgrp.buttons():
-        #     b.blockSignals(True)
-        #     b.toggle()
-        #     b.blockSignals(False)
-        # bgrp.blockSignals(False)
-        # #_ = [b.setChecked(not b.isChecked()) for b in bgrp.buttons()]
-        # #bgrp.blockSignals(False)
-        
-       
-        
-    
-
-        
-        
-        
-class AnalysisBtns(QtWidgets.QWidget):
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # View/save event channels; always available for all processed data folders
-        self.option1_widget = self.create_widget('Select event channels', 'green')
-        self.option1_btn = self.option1_widget.findChild(QtWidgets.QPushButton)
-        # Classify dentate spikes; requires event channels and probe DS_DF files
-        self.option2_widget = self.create_widget('Classify dentate spikes', 'blue')
-        self.option2_btn = self.option2_widget.findChild(QtWidgets.QPushButton)
-        
-        #self.btn_grp.addButton(self.option1_btn)
-        #self.btn_grp.addButton(self.option2_btn)
-        self.option1_widget.setEnabled(False)
-        self.option2_widget.setEnabled(False)
-        
-        #self.btn_grp.buttonToggled.connect(self.action_toggled)
-    
-    def create_widget(self, txt, c):
-        widget = QtWidgets.QWidget()
-        widget.setContentsMargins(0,0,0,0)
-        hlay = QtWidgets.QHBoxLayout(widget)
-        hlay.setContentsMargins(0,0,0,0)
-        hlay.setSpacing(8)
-        btn = QtWidgets.QPushButton()
-        #btn.setCheckable(True)
-        #clight = pyfx.hue(c, 0.7, 1); cdark = pyfx.hue(c, 0.4, 0)#; cdull = pyfx.hue(clight, 0.8, 0.5, alpha=0.5)
-        btn.setStyleSheet(btn_ss % (pyfx.hue(c, 0.7, 1),  pyfx.hue(c, 0.4, 0)))
-        lbl = QtWidgets.QLabel(txt)
-        hlay.addWidget(btn)
-        hlay.addWidget(lbl)
-        #self.btn_grp.addButton(btn)
-        return widget
-        
-    
-    def ddir_toggled(self, ddir, current_probe=0):
-        self.option1_widget.setEnabled(False)
-        self.option2_widget.setEnabled(False)
-        
-        if not os.path.isdir(ddir):
-            return
-        
-        files = os.listdir(ddir)
-        # required: basic LFP files
-        if all([bool(f in files) for f in ['lfp_bp.npz', 'lfp_time.npy', 'lfp_fs.npy']]):
-            self.option1_widget.setEnabled(True)  # req: basic LFP data
-        
-        # required: event channels file, DS_DF file for current probe
-        if f'DS_DF_{current_probe}' in files and f'theta_ripple_hil_chan_{current_probe}.npy' in files:
-            self.option2_widget.setEnabled(True)
-
-
-class MatplotlibPopup(QtWidgets.QDialog):
+class MatplotlibPopup(Popup):
     """ Simple popup window to display Matplotlib figure """
-    def __init__(self, fig, parent=None):
-        super().__init__(parent)
-        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-        from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-        self.canvas_layout = QtWidgets.QVBoxLayout()
+    def __init__(self, fig, toolbar_pos='top', title='', parent=None):
+        super().__init__(widgets=[], orientation='h', title=title, parent=parent)
+        # create figure and canvas
         self.fig = fig
         self.canvas = FigureCanvas(self.fig)
-        self.toolbar = NavigationToolbar(self.canvas, self)
-        self.canvas_layout.addWidget(self.toolbar)
+        # create toolbar
+        if toolbar_pos != 'none':
+            self.toolbar = NavigationToolbar(self.canvas, self)
+        if toolbar_pos in ['top','bottom', 'none']:
+            self.canvas_layout = QtWidgets.QVBoxLayout()
+        elif toolbar_pos in ['left','right']:
+            self.canvas_layout = QtWidgets.QHBoxLayout()
+            self.toolbar.setOrientation(QtCore.Qt.Vertical)
+            self.toolbar.setMaximumWidth(30)
+        # populate layout with canvas and toolbar (if indicated)
         self.canvas_layout.addWidget(self.canvas)
-        self.layout = QtWidgets.QHBoxLayout()
+        if toolbar_pos != 'none':
+            idx = 0 if toolbar_pos in ['top','left'] else 1
+            self.canvas_layout.insertWidget(idx, self.toolbar)
+            
+        #self.layout = QtWidgets.QHBoxLayout()
         self.layout.addLayout(self.canvas_layout)
-        self.setLayout(self.layout)
+        #self.setLayout(self.layout)
+    
+    def closeEvent(self, event):
+        plt.close()
+        self.deleteLater()
 
 
 def create_widget_row(key, val, param_type, description='', **kw):
@@ -942,27 +1219,305 @@ def create_filepath_row(txt, base_dir):
     vlay.addLayout(row1)
     return w,header,qlabel,btn
 
-        
-        
-        
-        
-# if __name__ == '__main__':
-#     app = QtWidgets.QApplication(sys.argv)
-#     app.setStyle('Fusion')
-#     app.setQuitOnLastWindowClosed(True)
+
+class SpinBoxDelegate(QtWidgets.QStyledItemDelegate):
+    """
+    Edit value of QTableView cell using a spinbox widget
+    """
+    def createEditor(self, parent, option, index):
+        """ Create spinbox for table cell """
+        spinbox = QtWidgets.QSpinBox(parent)
+        spinbox.valueChanged.connect(lambda: self.commitData.emit(spinbox))
+        return spinbox
     
-#     #ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/NN_JG008')
-#     #popup = InfoView(ddir=ddir)
+    def setEditorData(self, editor, index):
+        """ Initialize spinbox value from model data """
+        editor.setValue(index.data())
     
-#     nn_raw = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/raw_data/'
-#                 'JG008_071124n1_neuronexus')
-#     popup = RawDirectorySelectionPopup()
-#     #popup = ProbeFileSimple()
-#     #popup = thing()
-#     #popup = AuxDialog(n=6)
+    def setModelData(self, editor, model, index):
+        """ Update model data with new spinbox value """
+        if editor.value() != index.data():
+            model.setData(index, editor.value(), QtCore.Qt.EditRole)
+            
+
+
+class QtWaitingSpinner(QtWidgets.QWidget):
+    # initialize class variables
+    mColor = QtGui.QColor(QtCore.Qt.blue)
+    mRoundness = 100.0
+    mMinimumTrailOpacity = 31.4159265358979323846
+    mTrailFadePercentage = 50.0
+    mRevolutionsPerSecond = 1
+    mNumberOfLines = 20
+    mLineLength = 15
+    mLineWidth = 5
+    mInnerRadius = 50
+    mCurrentCounter = 0
+    mIsSpinning = False
+
+    def __init__(self, centerOnParent=True, disableParentWhenSpinning=True, disabledWidget=None, *args, **kwargs):
+        QtWidgets.QWidget.__init__(self, *args, **kwargs)
+        self.mCenterOnParent = centerOnParent
+        self.mDisableParentWhenSpinning = disableParentWhenSpinning
+        self.disabledWidget = disabledWidget
+        self.initialize()
     
-#     popup.show()
-#     popup.raise_()
+    def initialize(self):
+        # connect timer to rotate function
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self.rotate)
+        self.updateSize()
+        self.updateTimer()
+        self.hide()
+
+
+    @QtCore.pyqtSlot()
+    def rotate(self):
+        self.mCurrentCounter += 1
+        if self.mCurrentCounter > self.numberOfLines():
+            self.mCurrentCounter = 0
+        self.update()
+
+    def updateSize(self):
+        # adjust widget size based on input params for spinner radius/arm length
+        size = (self.mInnerRadius + self.mLineLength) * 2
+        self.setFixedSize(size, size)
+        
+    def updateTimer(self):
+        # set timer to rotate spinner every revolution
+        self.timer.setInterval(int(1000 / (self.mNumberOfLines * self.mRevolutionsPerSecond)))
+
+    def updatePosition(self):
+        # adjust widget position to stay in the center of parent window
+        if self.parentWidget() and self.mCenterOnParent:
+            self.move(int(self.parentWidget().width() / 2 - self.width() / 2),
+                      int(self.parentWidget().height() / 2 - self.height() / 2))
+
+    def lineCountDistanceFromPrimary(self, current, primary, totalNrOfLines):
+        # calculate distance between a given line and the "primary" line
+        distance = primary - current
+        if distance < 0:
+            distance += totalNrOfLines
+        return distance
+
+    def currentLineColor(self, countDistance, totalNrOfLines, trailFadePerc, minOpacity, color):
+        # adjust color shading on a line by distance from the primary line
+        if countDistance == 0:
+            return color
+
+        minAlphaF = minOpacity / 100.0
+
+        distanceThreshold = np.ceil((totalNrOfLines - 1) * trailFadePerc / 100.0)
+        if countDistance > distanceThreshold:
+            color.setAlphaF(minAlphaF)
+        # color interpolation
+        else:
+            alphaDiff = self.mColor.alphaF() - minAlphaF
+            gradient = alphaDiff / distanceThreshold + 1.0
+            resultAlpha = color.alphaF() - gradient * countDistance
+            resultAlpha = min(1.0, max(0.0, resultAlpha))
+            color.setAlphaF(resultAlpha)
+        return color
+
+    def paintEvent(self, event):
+        # initialize painter
+        self.updatePosition()
+        painter = QtGui.QPainter(self)
+        painter.fillRect(self.rect(), QtCore.Qt.transparent)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        if self.mCurrentCounter > self.mNumberOfLines:
+            self.mCurrentCounter = 0
+        painter.setPen(QtCore.Qt.NoPen)
+
+        for i in range(self.mNumberOfLines):
+            # draw & angle rounded rectangle evenly between lines based on current distance
+            painter.save()
+            painter.translate(self.mInnerRadius + self.mLineLength,
+                              self.mInnerRadius + self.mLineLength)
+            rotateAngle = 360.0 * i / self.mNumberOfLines
+            painter.rotate(rotateAngle)
+            painter.translate(self.mInnerRadius, 0)
+            distance = self.lineCountDistanceFromPrimary(i, self.mCurrentCounter,
+                                                          self.mNumberOfLines)
+            color = self.currentLineColor(distance, self.mNumberOfLines,
+                                          self.mTrailFadePercentage, self.mMinimumTrailOpacity, self.mColor)
+            painter.setBrush(color)
+            painter.drawRoundedRect(QtCore.QRect(0, -self.mLineWidth // 2, self.mLineLength, self.mLineLength),
+                                    self.mRoundness, QtCore.Qt.RelativeSize)
+            painter.restore()
+
+
+    def start(self):
+        # set spinner visible, disable parent widget if requested
+        self.updatePosition()
+        self.mIsSpinning = True  # track spinner activity
+        self.show()
+        
+        if self.mDisableParentWhenSpinning:
+            if self.parentWidget() and self.disabledWidget is None:
+                self.parentWidget.setEnabled(False)
+            elif self.disabledWidget is not None:
+                self.disabledWidget.setEnabled(False)
+        # if self.parentWidget() and self.mDisableParentWhenSpinning:
+        #     self.parentWidget().setEnabled(False)
+        # start timer
+        if not self.timer.isActive():
+            self.timer.start()
+            self.mCurrentCounter = 0
+
+    def stop(self):
+        # hide spinner, re-enable parent widget, stop timer
+        self.mIsSpinning = False
+        self.hide()
+        
+        if self.mDisableParentWhenSpinning:
+            if self.parentWidget() and self.disabledWidget is None:
+                self.parentWidget.setEnabled(True)
+            elif self.disabledWidget is not None:
+                self.disabledWidget.setEnabled(True)
+        
+        # if self.parentWidget() and self.mDisableParentWhenSpinning:
+        #     self.parentWidget().setEnabled(True)
+
+        if self.timer.isActive():
+            self.timer.stop()
+            self.mCurrentCounter = 0
+
+    def setNumberOfLines(self, lines):
+        self.mNumberOfLines = lines
+        self.updateTimer()
+
+    def setLineLength(self, length):
+        self.mLineLength = length
+        self.updateSize()
+
+    def setLineWidth(self, width):
+        self.mLineWidth = width
+        self.updateSize()
+
+    def setInnerRadius(self, radius):
+        self.mInnerRadius = radius
+        self.updateSize()
+
+    def color(self):
+        return self.mColor
+
+    def roundness(self):
+        return self.mRoundness
+
+    def minimumTrailOpacity(self):
+        return self.mMinimumTrailOpacity
+
+    def trailFadePercentage(self):
+        return self.mTrailFadePercentage
+
+    def revolutionsPersSecond(self):
+        return self.mRevolutionsPerSecond
+
+    def numberOfLines(self):
+        return self.mNumberOfLines
+
+    def lineLength(self):
+        return self.mLineLength
+
+    def lineWidth(self):
+        return self.mLineWidth
+
+    def innerRadius(self):
+        return self.mInnerRadius
+
+    def isSpinning(self):
+        return self.mIsSpinning
+
+    def setRoundness(self, roundness):
+        self.mRoundness = min(0.0, max(100, roundness))
+
+    def setColor(self, color):
+        self.mColor = color
+
+    def setRevolutionsPerSecond(self, revolutionsPerSecond):
+        self.mRevolutionsPerSecond = revolutionsPerSecond
+        self.updateTimer()
+
+    def setTrailFadePercentage(self, trail):
+        self.mTrailFadePercentage = trail
+
+    def setMinimumTrailOpacity(self, minimumTrailOpacity):
+        self.mMinimumTrailOpacity = minimumTrailOpacity
+
+
+class SpinnerWindow(QtWidgets.QWidget):
+    def __init__(self, parent=None, show_label=True):
+        super(SpinnerWindow, self).__init__(parent)
+        self.win = parent
+        self.layout = QtWidgets.QVBoxLayout()
+        self.layout.setContentsMargins(0,0,0,0)
+        self.layout.setSpacing(10)
+        # create spinner object
+        self.spinner_widget = QtWidgets.QWidget()
+        self.spinner = QtWaitingSpinner(disabledWidget=self.win)
+        self.spinner.setParent(self.spinner_widget)
+        # create label to display updates
+        self.spinner_label = QtWidgets.QLabel('')
+        self.spinner_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.spinner_label.setWordWrap(True)
+        self.spinner_label.setStyleSheet('QLabel'
+                                         '{'
+                                         'background-color : rgba(230,230,255,200);'
+                                         'border : 2px double darkblue;'
+                                         'border-radius : 8px;'
+                                         'color : darkblue;'
+                                         'font-size : 12pt;'
+                                         'font-weight : 900;'
+                                         'padding : 5px'
+                                         '}')
+        self.spinner_label.setFixedSize(int(self.spinner.width()*2), int(self.spinner.height()*0.75))
+        # add label and spinner to layout, set size
+        if show_label:
+            self.layout.addWidget(self.spinner_label, alignment=QtCore.Qt.AlignHCenter)
+        self.layout.addWidget(self.spinner_widget)
+        self.setLayout(self.layout)
+        self.setFixedSize(int(self.spinner.width()*2), int(self.spinner.height()*2))
+        self.hide()
     
-#     sys.exit(app.exec())
+    def adjust_labelSize(self, lw=2, lh=0.75, ww=2, wh=2):
+        self.spinner_label.setFixedSize(int(self.spinner.width()*lw), int(self.spinner.height()*lh))
+    #def adjust_widgetSize(self, w=2, h=2):
+        self.setFixedSize(int(self.spinner.width()*ww), int(self.spinner.height()*wh))
+    
+    def start_spinner(self):
+        xpos = int(self.win.width() / 2 - self.width() / 2)
+        ypos = int(self.win.height() / 2 - self.height() / 2)
+        self.move(xpos, ypos)
+        self.show()
+        self.spinner.start()
+    
+    def stop_spinner(self):
+        self.spinner.stop()
+        self.spinner_label.setText('')
+        self.hide()
+        
+    
+    @QtCore.pyqtSlot(str)
+    def report_progress_string(self, txt):
+        self.spinner_label.setText(txt)
+        
+if __name__ == '__main__':
+    app = QtWidgets.QApplication(sys.argv)
+    app.setStyle('Fusion')
+    app.setQuitOnLastWindowClosed(True)
+    
+    #ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/NN_JG008')
+    #popup = InfoView(ddir=ddir)
+    
+    arr = np.load('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/'
+                  'stanford/JF512/DownsampleLFP.npy')
+    
+    # popup = RawArrayLoader(arr)
+    
+    
+    # popup.show()
+    # popup.raise_()
+    
+    # sys.exit(app.exec())
     

@@ -424,7 +424,9 @@ class DS_CSDWidget(QtWidgets.QFrame):
                      nclusters        = self.nclus_sbox.value(),
                      eps              = self.eps_sbox.value(),
                      min_clus_samples = self.minN_sbox.value())
-        return ddict
+        
+        ddict2 = ephys.read_param_file()
+        return ddict2
         
     def update_filter_widgets(self):
         """ Enable/disable widgets based on selected filter """
@@ -755,8 +757,8 @@ class DS_CSDWindow(QtWidgets.QDialog):
         pca_fit = pca.fit_transform(self.norm_filt_csd.T) # PCA
         
         # unsupervised clustering via K-means and DBSCAN algorithms
-        self.kmeans = KMeans(n_clusters=ddict['nclusters'], n_init='auto').fit(pca_fit)
-        self.dbscan = DBSCAN(eps=ddict['eps'], min_samples=ddict['min_clus_samples']).fit(pca_fit)  # 0->1, 1->2
+        self.kmeans = KMeans(n_clusters=int(ddict['nclusters']), n_init='auto').fit(pca_fit)
+        self.dbscan = DBSCAN(eps=ddict['eps'], min_samples=int(ddict['min_clus_samples'])).fit(pca_fit)  # 0->1, 1->2
         kmeans_types = np.array([{0:2, 1:1}.get(x, 0) for x in self.kmeans.labels_])  # 0->2, 1->1, other->0
         db_types = np.array([{0:1, 1:2}.get(x, 0) for x in self.dbscan.labels_])      # 0->1, 1->2, other->0
         
@@ -805,14 +807,18 @@ class DS_CSDWindow(QtWidgets.QDialog):
         res = msgbox.exec()
         if res == QtWidgets.QMessageBox.Yes:
             self.accept()
+    
+    def closeEvent(self, event):
+        plt.close()
+        self.deleteLater()
+
 
 if __name__ == '__main__':
     # ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/raw_data/'
     #         'JG007_2_2024-07-09_15-40-43_openephys/Record Node 103/experiment1/recording1')
     
     ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/JG008')
-    app = QtWidgets.QApplication(sys.argv)
-    app.setStyle('Fusion')
+    pyfx.qapp()
     
     # NEW TO-DO LIST
     # Annotate sample sizes on DS1 and DS2 neuron plots (plus axis labels and whatnot)
@@ -830,4 +836,5 @@ if __name__ == '__main__':
         
     #w.show()
     w.raise_()
-    sys.exit(app.exec())
+    w.exec()
+    #sys.exit(app.exec())

@@ -11,23 +11,22 @@ import scipy
 import numpy as np
 import pandas as pd
 import matplotlib
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns
 from copy import deepcopy
-from PyQt5 import QtWidgets, QtCore
+import quantities as pq
+from PyQt5 import QtWidgets, QtCore, QtGui
+import probeinterface as prif
 import pdb
 # custom modules
 import pyfx
 import ephys
 import gui_items as gi
+import resources_rc
 
-def var2str(t, a, b, space=' '):
-    """ Create frequency band label for plots """
-    fx = lambda a,b: f'({a} - {b} Hz)'
-    fx2 = lambda t,lbl: f'{t}{os.linesep if t else ""}{lbl}'
-    return fx2(t, fx(a,b).replace(' ', space))
 
 def str_fmt(ddict, key=None, key_top=True):
     """ Create structured annotation string for individual event plots """
@@ -40,9 +39,8 @@ def str_fmt(ddict, key=None, key_top=True):
     return fmt
        
 
-class IFigLFP(matplotlib.figure.Figure):
+class IFigLFP(QtWidgets.QWidget):
     """ Main channel selection figure; scrollable LFPs with optional event markers """
-    
     SHOW_DS = True
     SHOW_SWR = True
     SHOW_SZR = False
@@ -53,46 +51,116 @@ class IFigLFP(matplotlib.figure.Figure):
         self.lfp_time = lfp_time
         self.lfp_fs = lfp_fs
         self.PARAMS = PARAMS
+        self.channels = np.arange(self.DATA['raw'].shape[0])
         
         twin = kwargs.get('twin', 1)
         event_channels = kwargs.get('event_channels', [0,0,0])
         self.ch_cmap = pd.Series(['blue', 'green', 'red'], index=event_channels)
         
+        self.probe = kwargs.get('probe', None)
         self.DS_ALL = kwargs.get('DS_ALL', None)
         self.SWR_ALL = kwargs.get('SWR_ALL', None)
+        self.STD = kwargs.get('STD', None)
         self.seizures = kwargs.get('seizures', [])
-        try:
-            self.seizures_mid = np.array(list(map(pyfx.Center, self.seizures)))
-        except:
-            self.seizures_mid = np.array(())
-        # initialize event indexes (empty) and event trains (zeros)
-        self.DS_idx = np.array(())
-        self.SWR_idx = np.array(())
-        self.DS_train = np.zeros(len(self.lfp_time))
-        self.SWR_train = np.zeros(len(self.lfp_time))
-        self.SZR_train = np.zeros(len(self.lfp_time))
-        for iseq in self.seizures:
-            self.SZR_train[iseq] = 1
+        self.init_event_items()  # create event indexes/trains/etc
         
         # create subplots and interactive widgets
         self.create_subplots(twin=twin)
         
-
+        self.fig.set_tight_layout(True)
+        self.fig_w.set_tight_layout(True)
+        self.fig_freq.set_tight_layout(True)
+        
+        self.canvas = FigureCanvas(self.fig)
+        self.canvas.setFocusPolicy(QtCore.Qt.ClickFocus)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setOrientation(QtCore.Qt.Vertical)
+        self.toolbar.setMaximumWidth(30)
+        self.canvas_freq = FigureCanvas(self.fig_freq)
+        self.canvas_w = FigureCanvas(self.fig_w)
+        self.canvas_w.setMaximumHeight(80)
+        
+        self.connect_mpl_widgets()
+        
+        self.plot_row = QtWidgets.QHBoxLayout()
+        self.plot_row.addWidget(self.toolbar, stretch=0)
+        self.plot_row.addWidget(self.canvas, stretch=5)
+        self.plot_row.addWidget(self.canvas_freq, stretch=3)
+        
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.addWidget(self.canvas_w)
+        self.layout.addLayout(self.plot_row)
+        self.canvas_freq.hide()
+        
+    
+    def connect_mpl_widgets(self):
+        def onselect(xmin, xmax):
+            self.xspan = xmax - xmin
+            self.canvas.draw_idle()
+            
+        def oncallback(xmin, xmax):
+            self.canvas.draw_idle()
+            
+        self.xspan = 0
+        self.span = matplotlib.widgets.SpanSelector(ax=self.ax,
+                                                    onselect=onselect,
+                                                    onmove_callback=oncallback,
+                                                    direction='horizontal',
+                                                    button = 1,
+                                                    useblit=True,
+                                                    interactive = True,
+                                                    drag_from_anywhere=True,
+                                                    props = dict(fc='red', ec='black', lw=5, alpha=0.5))
+        
+        def on_press(event):
+            # update current timepoint with arrow keys 
+            if event.key   == 'left'  : self.iw.i.key_step(0)  # step backwards
+            elif event.key == 'right' : self.iw.i.key_step(1)  # step forwards
+            
+            elif event.key in ['enter', 'backspace'] and self.xspan > 0:
+                imin, imax = map(lambda x: int(x*self.lfp_fs), self.span.extents)
+                if event.key=='backspace':
+                    if self.SHOW_DS:
+                        # hide events
+                        qidx = np.intersect1d(np.arange(imin, imax), self.DS_idx)
+                        self.DS_idx = np.setdiff1d(self.DS_idx, qidx)  # remove from list
+                        self.DS_train[qidx] *= -self.DS_train[qidx]    # flip sign in event train (1 -> -1)
+                        
+                    if self.SHOW_SWR:
+                        qidx2 = np.intersect1d(np.arange(imin, imax), self.SWR_idx)
+                        self.SWR_idx = np.setdiff1d(self.SWR_idx, qidx2)
+                        self.SWR_train[qidx2] *= -self.SWR_train[qidx2]
+                    
+                    self.span.set_visible(False)
+                    self.plot_lfp_data()
+                
+                #elif event.key=='n':
+                    
+                    
+                elif event.key=='enter' and self.coord_electrode is not None:
+                    # plot temporary CSD
+                    arr = self.DATA['raw'][:, imin:imax]
+                    csd_obj = ephys.get_csd_obj(arr, self.coord_electrode, self.PARAMS)
+                    csd = ephys.csd_obj2arrs(csd_obj)[1]
+                    xax = self.lfp_time[imin:imax]
+                    yax  = np.linspace(-1, len(csd), len(csd)) * -1
+                    im = self.ax.pcolorfast(xax, yax, csd, cmap=plt.get_cmap('bwr'))
+                    self.span.set_visible(False)
+                    self.canvas.draw_idle()
+                
+        self.cid = self.canvas.mpl_connect("key_press_event", on_press)
+        #self.cid = self.canvas.mpl_connect("key_press_event", self.iw.i.key_step)
+            
+    
     def create_subplots(self, twin):
         """ Set up data and widget subplot axes """
-        # create axes
-        mosaic = [['sax0','bax'],   # time window (twin) slider axes
-                  ['tax', 'tax'],   # y-axis scale (ywin) slider axes
-                  ['spacer','spacer'],
-                  ['main','main']]  # main LFP data axes
-        subplot_kwargs = {**dict(height_ratios=[1,1,0.5,19], width_ratios=[5,1], 
-                                 gridspec_kw=dict(hspace=0, wspace=None))}
-        self.axs = self.subplot_mosaic(mosaic, **subplot_kwargs)
-        divider = make_axes_locatable(self.axs['sax0'])
-        self.axs['sax1'] = divider.append_axes('right', size="100%", pad=0.5)
-        self.axs['bax'].set_axis_off()
-        self.axs['spacer'].set_visible(False)
-        self.ax = self.axs['main']
+        
+        self.fig_w = matplotlib.figure.Figure()#plt.figure()
+        gridspec = matplotlib.gridspec.GridSpec(2, 2, figure=self.fig_w)
+        self.sax0 = self.fig_w.add_subplot(gridspec[0,0])
+        self.sax1 = self.fig_w.add_subplot(gridspec[0,1])
+        #self.bax = self.fig_w.add_subplot(gridspec[0,2])
+        self.tax = self.fig_w.add_subplot(gridspec[1,:])
         # set slider params
         iwin = int(twin*self.lfp_fs)
         i_kw = dict(valmin=iwin, valmax=len(self.lfp_time)-iwin-1, valstep=1, valfmt='%s s', 
@@ -101,31 +169,121 @@ class IFigLFP(matplotlib.figure.Figure):
         ycoeff_kw = dict(valmin=-50, valmax=50, valstep=1, valinit=0, initcolor='none')
         
         # create sliders
-        iwin_sldr   = matplotlib.widgets.Slider(self.axs['sax0'], 'X', **iwin_kw)
+        iwin_sldr   = matplotlib.widgets.Slider(self.sax0, 'X', **iwin_kw)
         iwin_sldr.valtext.set_visible(False)
-        ycoeff_sldr = matplotlib.widgets.Slider(self.axs['sax1'], 'Y', **ycoeff_kw)
+        ycoeff_sldr = matplotlib.widgets.Slider(self.sax1, 'Y', **ycoeff_kw)
         ycoeff_sldr.valtext.set_visible(False)
-        i_sldr = gi.CSlider(self.axs['tax'], 'i', **i_kw)
+        i_sldr = gi.CSlider(self.tax, 'i', **i_kw)
         i_sldr.nsteps = int(iwin/2)
         i_sldr.valtext.set_visible(False)
-        # create radio buttons
-        labels = ['raw','theta','slow_gamma','fast_gamma']
-        radio_btns = matplotlib.widgets.RadioButtons(self.axs['bax'], labels=labels, active=0,
-                                                     activecolor='black')#, radio_props=dict(s=50))
-        # connect widget signals
-        self.iw = pd.Series(dict(i=i_sldr, iwin=iwin_sldr, ycoeff=ycoeff_sldr, btns=radio_btns))
+        # # create radio buttons
+        # labels = ['raw','theta','slow_gamma','fast_gamma']
+        # radio_btns = matplotlib.widgets.RadioButtons(self.bax, labels=labels, active=0,
+        #                                              activecolor='black')#, radio_props=dict(s=50))
+        
+        # connect slider signals
+        self.iw = pd.Series(dict(i=i_sldr, iwin=iwin_sldr, ycoeff=ycoeff_sldr))#, btns=radio_btns))
         self.iw.i.on_changed(self.plot_lfp_data)
         self.iw.iwin.on_changed(self.plot_lfp_data)
         self.iw.ycoeff.on_changed(self.plot_lfp_data)
-        if isinstance(self.iw.btns, matplotlib.widgets.RadioButtons):
-            self.iw.btns.on_clicked(self.plot_lfp_data)
+        # if isinstance(self.iw.btns, matplotlib.widgets.RadioButtons):
+        #     self.iw.btns.on_clicked(self.plot_lfp_data)
+        
+        self.fig = matplotlib.figure.Figure()
+        self.ax = self.fig.add_subplot()
+        
+        self.fig_freq = matplotlib.figure.Figure()
+        #gridspec2 = matplotlib.gridspec.GridSpec(1, 3, figure=self.fig_freq)
+        fax0 = self.fig_freq.add_subplot(131)
+        fax1 = self.fig_freq.add_subplot(132, sharey=fax0)
+        fax2 = self.fig_freq.add_subplot(133, sharey=fax1)
+        self.faxs = [fax0, fax1, fax2]
+        self.ax.sharey(fax0)
         
         
+    def plot_freq_band_pwr(self):
+        _ = [ax.clear() for ax in self.faxs]
+        
+        self.freq_kw = dict(xytext=(4,4), xycoords=('axes fraction','data'), 
+                            bbox=dict(facecolor='w', edgecolor='w', 
+                                      boxstyle='square,pad=0.0'),
+                            textcoords='offset points', va='bottom', 
+                            fontweight='semibold', annotation_clip=True)
+        yax = self.channels * -1
+        
+        (TH,THC), (RPL,RPLC), (HIL,HILC) = self.ch_cmap.items()
+        
+        # plot theta power
+        self.faxs[0].plot(self.STD['norm_theta'], yax, color='black')
+        self.faxs[0].axhline(TH*-1, c=THC)
+        self.faxs[0].annotate('Theta', xy=(0,TH*-1), color=THC, **self.freq_kw)
+        
+        # plot ripple power
+        self.faxs[1].plot(self.STD['norm_swr'], yax, color='black')
+        self.faxs[1].axhline(RPL*-1, c=RPLC)
+        self.faxs[1].annotate('Ripple', xy=(0,RPL*-1), color=RPLC, **self.freq_kw)
+        
+        # plot fast and slow gamma power
+        self.faxs[2].plot(self.STD['slow_gamma'], yax, color='gray', lw=2, label='slow')
+        self.faxs[2].plot(self.STD['fast_gamma'], yax, color='indigo', lw=2, label='fast')
+        self.faxs[2].axhline(HIL*-1, c=HILC)
+        self.faxs[2].annotate('Hilus', xy=(0,HIL*-1), color=HILC, **self.freq_kw)
+        
+        # set axis titles, labels, legend
+        self.faxs[0].set_title('Theta Power', va='bottom', y=0.97)
+        self.faxs[1].set_title('Ripple Power', va='bottom', y=0.97)
+        self.faxs[2].set_title('Gamma Power', va='bottom', y=0.97)
+        leg = self.faxs[2].legend(loc='upper right', bbox_to_anchor=(1.1,.95))
+        _ = [ax.set_xlabel('SD') for ax in self.faxs]
+        
+        # set style, annotation kwargs
+        self.faxs[1].spines['left'].set_visible(False)
+        self.faxs[2].spines['left'].set_visible(False)
+        
+        
+    def switch_the_probe(self, **kwargs):
+        self.DATA = kwargs['DATA']
+        event_channels = kwargs.get('event_channels', [0,0,0])
+        self.ch_cmap = pd.Series(['blue', 'green', 'red'], index=event_channels)
+        
+        self.probe = kwargs.get('probe', None)
+        self.DS_ALL = kwargs.get('DS_ALL', None)
+        self.SWR_ALL = kwargs.get('SWR_ALL', None)
+        self.seizures = kwargs.get('seizures', [])
+        
+        self.init_event_items()
+        
+    
+    def init_event_items(self):
+        # must have set DS_ALL, SWR_ALL, seizures
+        # initialize event indexes (empty) and event trains (zeros)
+        self.DS_idx = np.array(())
+        self.SWR_idx = np.array(())
+        self.DS_train = np.zeros(len(self.lfp_time))
+        self.SWR_train = np.zeros(len(self.lfp_time))
+        self.SZR_train = np.zeros(len(self.lfp_time))
+        for iseq in self.seizures:
+            self.SZR_train[iseq] = 1
+        try: self.seizures_mid = np.array(list(map(pyfx.Center, self.seizures)))
+        except: self.seizures_mid = np.array(())
+        
+        # get data timecourses
+        self.lfp_ampl = np.nansum(self.DATA['raw'], axis=0)
+        
+        # try getting electrode geometry in meters
+        self.coord_electrode = None
+        if self.probe is not None:
+            ypos = np.array(sorted(self.probe.contact_positions[:, 1]))
+            self.coord_electrode = pq.Quantity(ypos, self.probe.si_units).rescale('m')  # um -> m
+    
+    
+    
     def channel_changed(self, theta_chan, ripple_chan, hil_chan):
         """ Update currently selected event channels and indices """
         self.event_channels = [theta_chan, ripple_chan, hil_chan]
         self.theta_chan, self.ripple_chan, self.hil_chan = self.event_channels
         self.ch_cmap = self.ch_cmap.set_axis(self.event_channels)
+        
         if self.DS_ALL is not None:
             self.DS_idx = self.DS_ALL[self.DS_ALL.ch == self.hil_chan].idx
             self.DS_train[:] = 0
@@ -136,6 +294,7 @@ class IFigLFP(matplotlib.figure.Figure):
             self.SWR_train[self.SWR_idx] = 1
         self.plot_lfp_data()
     
+        
     
     def event_jump(self, sign, event):
         """ Set plot index to the next (or previous) instance of a given event """
@@ -153,39 +312,43 @@ class IFigLFP(matplotlib.figure.Figure):
         
         # set index slider to next event (automatically updates plot)
         self.iw.i.set_val(idx_next[0])
-        
+    
+    
+    def point_jump(self, val, unit):
+        """ Set plot index to the given index or timepoint  """
+        if   unit == 't' : new_idx = pyfx.IdxClosest(val, self.lfp_time)
+        elif unit == 'i' : new_idx = val
+        self.iw.i.set_val(new_idx)
+    
         
     def plot_lfp_data(self, x=None):
         """ Update LFP signals on graph """
         self.ax.clear()
-        
         i,iwin = self.iw.i.val, self.iw.iwin.val
         idx = np.arange(i-iwin, i+iwin)
         x = self.lfp_time[idx]
-        #x = self.lfp_time[i-iwin : i+iwin]
-        arr = self.DATA[self.iw.btns.value_selected]
+        arr = self.DATA['raw']
         self.iw.i.nsteps = int(iwin/2)
         
         # scale signals based on y-slider value
         if   self.iw.ycoeff.val < -1 : coeff = 1/np.abs(self.iw.ycoeff.val) * 2
         elif self.iw.ycoeff.val >  1 : coeff = self.iw.ycoeff.val / 2
         else                         : coeff = 1
-        for irow,y in enumerate(arr) :
+        for irow,y in enumerate(arr):
             clr = self.ch_cmap.get(irow, 'black')
             if isinstance(clr, pd.Series): clr = clr.values[0]
             # plot LFP signals (-y + irow, then invert y-axis)
-            #self.ax.plot(x, -y[i-iwin:i+iwin]*coeff + irow, color=clr, label=str(irow), lw=1)
-            self.ax.plot(x, -y[idx]*coeff + irow, color=clr, label=str(irow), lw=1)
-        self.ax.invert_yaxis()
+            self.ax.plot(x, y[idx]*coeff - irow, color=clr, label=str(irow), lw=1)
+        #self.ax.invert_yaxis()
         
         # mark ripple/DS events with red/green lines
         if self.SHOW_DS:
-            ds_times = x[np.nonzero(self.DS_train[idx])[0]]
+            ds_times = x[np.where(self.DS_train[idx] == 1)[0]]
             #ds_times = x[np.nonzero(self.DS_train[i-iwin : i+iwin])[0]]
             for dst in ds_times:
                 self.ax.axvline(dst, color='red', zorder=-5, alpha=0.4)
         if self.SHOW_SWR:
-            swr_times = x[np.nonzero(self.SWR_train[idx])[0]]
+            swr_times = x[np.where(self.SWR_train[idx] == 1)[0]]
             for swrt in swr_times:
                 self.ax.axvline(swrt, color='green', zorder=-5, alpha=0.4)
         if self.SHOW_SZR:
@@ -196,67 +359,27 @@ class IFigLFP(matplotlib.figure.Figure):
         self.ax.set(xlabel='Time (s)', ylabel='channel index')
         self.ax.set_xmargin(0.01)
         self.canvas.draw_idle()
-
-
-class IFigLFP2(IFigLFP):
-    """ Main figure layout 2: show frequency band plots """
+        
+        if self.canvas_freq.isVisible():
+            self.plot_freq_band_pwr()
+            self.canvas_freq.draw_idle()
     
-    def __init__(self, STD, *args, **kwargs):
-        self.STD = STD
-        self.channels = self.STD.index.values
-        super().__init__(*args, **kwargs)
     
-    def create_subplots(self, twin=1):
-        """ Add plots to the right of main axes """
-        super().create_subplots(twin=twin)
-        divider = make_axes_locatable(self.ax)
-        fax0 = divider.append_axes('right', size="30%", pad=0.5)
-        fax1 = divider.append_axes('right', size="30%", pad=0.2, sharey=fax0)
-        fax2 = divider.append_axes('right', size="30%", pad=0.2, sharey=fax1)
-        self.ax.sharey(fax0)
-        self.faxs = [fax0,fax1,fax2]
+    # @classmethod
+    # def run_ifig_popup(cls, *args, **kwargs):
+    #     pyfx.qapp()
+    #     fig = cls(*args, **kwargs)
+    #     fig.set_tight_layout(True)
+    #     fig.plot_lfp_data()
+    #     popup = gi.Popup(widgets=[fig.canvas])
+    #     popup.setGeometry(pyfx.ScreenRect(0.7, 0.9))
+    #     popup.show()
+    #     popup.raise_()
+    #     popup.exec()
     
-    def plot_lfp_data(self, x=None):
-        """ Plot power across channels for each frequency band """
-        super().plot_lfp_data(x)
-        _ = [ax.clear() for ax in self.faxs]
-        
-        (CH0,CH1,CH2), (C0,C1,C2) = list(zip(*self.ch_cmap.items()))
-        
-        # plot theta power
-        self.faxs[0].plot(self.STD['norm_theta'], self.channels, color='black')
-        self.faxs[0].axhline(CH0, c=C0)
-        
-        # plot ripple power
-        self.faxs[1].plot(self.STD['norm_swr'], self.channels, color='black')
-        self.faxs[1].axhline(CH1, c=C1)
-        
-        # plot fast and slow gamma power
-        self.faxs[2].plot(self.STD['slow_gamma'], self.channels, color='gray', lw=2, label='slow')
-        self.faxs[2].plot(self.STD['fast_gamma'], self.channels, color='indigo', lw=2, label='fast')
-        self.faxs[2].axhline(CH2, c=C2)
-        
-        # annotate channels
-        kw = dict(xytext=(4,4), xycoords=('axes fraction','data'), 
-                  bbox=dict(facecolor='w', edgecolor='w', boxstyle='square,pad=0.0'),
-                  textcoords='offset points', va='bottom', fontweight='semibold',
-                  annotation_clip=True)
-        self.faxs[0].annotate('Theta channel', xy=(0,CH0), color=C0, **kw)
-        self.faxs[1].annotate('Ripple channel', xy=(0,CH1), color=C1, **kw)
-        self.faxs[2].annotate('Hilus channel', xy=(0,CH2), color=C2, **kw)
-        # set axis titles
-        self.faxs[0].set_title(var2str('Theta Power', *self.PARAMS.theta), va='bottom', y=0.97)
-        self.faxs[1].set_title(var2str('Ripple Power', *self.PARAMS.swr_freq), va='bottom', y=0.97)
-        gf0, gf1 = self.PARAMS.slow_gamma[0], self.PARAMS.fast_gamma[1]
-        self.faxs[2].set_title(var2str('Gamma Power', gf0, gf1), va='bottom', y=0.97)
-        _ = [ax.set_xlabel('SD') for ax in self.faxs]
-        self.faxs[2].legend(loc='upper right', bbox_to_anchor=(1.1,.95), draggable=True)
-        
-        self.faxs[1].spines['left'].set_visible(False)
-        self.faxs[2].spines['left'].set_visible(False)
-        self.faxs[0].invert_yaxis()
-        self.faxs[0].margins(0.1)
-        self.canvas.draw_idle()
+    def closeEvent(self, event):
+        plt.close()
+        event.accept()
         
         
 class IFigEvent(matplotlib.figure.Figure):
@@ -267,25 +390,29 @@ class IFigEvent(matplotlib.figure.Figure):
     annot_dict = dict(time='{time:.2f} s')
     CHC = pd.Series(pyfx.rand_hex(96))
     
-    def __init__(self, ch, DF_ALL, LFP_arr, lfp_time, lfp_fs, PARAMS, **kwargs):
+    def __init__(self, ch, DF_ALL, DATA, lfp_time, lfp_fs, PARAMS, **kwargs):
         super().__init__()
+        
         # initialize params from input arguments
         self.ch = ch
         self.DF_ALL = DF_ALL
-        self.LFP_arr = LFP_arr
+        self.DATA = DATA
         self.lfp_time = lfp_time
         self.lfp_fs = lfp_fs
         self.PARAMS = PARAMS
-        self.channels = np.arange(self.LFP_arr.shape[0])
         twin = kwargs.get('twin', 0.2)
         self.thresholds = kwargs.get('thresholds', {})
+        
+        # get LFP and DF for the primary channel
+        self.LFP_arr = self.DATA['raw']
+        self.LFP = self.LFP_arr[self.ch]
+        self.channels = np.arange(self.LFP_arr.shape[0])
+        
         # get DF means per channel
         self.DF_MEAN = self.DF_ALL.groupby('ch').agg('mean')
         self.DF_MEAN = ephys.replace_missing_channels(self.DF_MEAN, self.channels)
         self.DF_MEAN.insert(0, 'ch', self.DF_MEAN.index.values)
         
-        # get LFP and DF for the primary channel
-        self.LFP = self.LFP_arr[self.ch]
         if self.ch in self.DF_ALL.ch:
             self.DF = self.DF_ALL.loc[self.ch]
         else:
@@ -318,8 +445,9 @@ class IFigEvent(matplotlib.figure.Figure):
                                         ['main','main','main']], **subplot_kwargs)
         divider = make_axes_locatable(self.axs['sax0'])
         self.axs['sax1'] = divider.append_axes('right', size="100%", pad=0.5)
-        self.ax = self.axs['main']
         self.axs['spacer'].set_visible(False)
+        
+        self.ax = self.axs['main']
         
         ###   PLOT EVENTS FROM ALL CHANNELS   ###
         
@@ -350,7 +478,7 @@ class IFigEvent(matplotlib.figure.Figure):
         self.hThr_line.set_visible(False)
         self.thres_items = [self.hThr_line]
         # set threshold legend params
-        self.thres_leg_kw = dict(loc='upper right',  bbox_to_anchor=(1,1), 
+        self.thres_leg_kw = dict(loc='lower right',  bbox_to_anchor=(1,1), 
                                  title='Thresholds', draggable=True)
         
         # create sliders
@@ -423,7 +551,9 @@ class IFigEvent(matplotlib.figure.Figure):
     
     def plot_event_data(self, event, twin=None, ywin=None):
         """ Update event data on graph; plot avg waveform or single events """
-        self.ax.clear()
+        #self.ax.clear()
+        _ = [x.remove() for x in self.ax.lines + self.ax.collections + self.ax.texts]
+        self.ax.set_title('', loc='left')
         # get waveform indexes for new time window
         if twin is not None:
             self.update_twin(twin)
@@ -441,8 +571,7 @@ class IFigEvent(matplotlib.figure.Figure):
         self.ax.set_ylabel('Amplitude')
         self.ax.set_xlabel('Time (s)')
         
-        if len(self.iev) == 0:
-            return
+        if len(self.iev) == 0: return
         
         ### average waveform(s)
         if self.FLAG == 0:
@@ -472,7 +601,7 @@ class IFigEvent(matplotlib.figure.Figure):
             title = f'Average Waveform for Channel {self.ch}\n(n = {len(self.iev)} events)'
             self.ax.set_title(title, loc='left', va='top', ma='center', x=0.01, y=0.98, 
                               fontdict=dict(fontweight='bold'))
-        
+            
         ### plot individual events
         else:
             self.idx  = self.iev[event]
@@ -515,6 +644,28 @@ class IFigSWR(IFigEvent):
     def create_subplots(self, **kwargs):
         """ Add artists to subplots """
         super().create_subplots(**kwargs)
+        
+        self.radio_ax = self.ax.inset_axes([0.8, 0.8, 0.2, 0.2])
+        self.radio_ax.set_axis_off()
+        self.dbtns = matplotlib.widgets.RadioButtons(self.radio_ax, labels=['Raw','Filtered'], active=0, activecolor='black')
+        _ = self.radio_ax.collections[0].set(sizes=[125,125])
+        _ = [lbl.set(fontsize=12) for lbl in self.dbtns.labels]
+        
+        def toggle_data(label):
+            if label == 'Raw':
+                self.LFP_arr = self.DATA['raw']
+            else:
+                self.LFP_arr = self.DATA['swr']
+            self.LFP = self.LFP_arr[self.ch]
+            
+            self.hilb = scipy.signal.hilbert(self.LFP)
+            self.env = np.abs(self.hilb).astype('float32')
+            
+            self.plot_event_data(event=None)
+            self.canvas.draw_idle()
+            
+        self.dbtns.on_clicked(toggle_data)
+            
         
         ### create additional threshold items
         # min height at edges of ripple event
@@ -559,7 +710,7 @@ class IFigSWR(IFigEvent):
                 dur_x = [-dur_mean/2, dur_mean/2]
                 dur_y = [pyfx.Limit(self.ev_y, mode=0)]*2
                 dur_line = self.ax.plot(dur_x, dur_y, color='darkgreen', lw=3, 
-                                        marker='|', ms=20, mew=3, label='duration')[0]
+                                        marker='|', ms=10, mew=3, label='duration')[0]
                 feat_items.append(dur_line)
                 
         elif self.FLAG == 1:
@@ -572,9 +723,10 @@ class IFigSWR(IFigEvent):
                 dur_x = [self.E.start-self.E.time, self.E.stop-self.E.time+self.dt]
                 dur_y = [pyfx.Limit(self.ev_y, mode=0)]*2
                 dur_line = self.ax.plot(dur_x, dur_y, color='darkgreen', lw=3, 
-                                        marker='|', ms=20, mew=3, label='duration')[0]
+                                        marker='|', ms=10, mew=3, label='duration')[0]
                 feat_items.append(dur_line)
         self.canvas.draw_idle()
+    
         
 
 class IFigDS(IFigEvent):
@@ -589,6 +741,24 @@ class IFigDS(IFigEvent):
     
     def create_subplots(self, **kwargs):
         super().create_subplots(**kwargs)
+        
+        self.radio_ax = self.ax.inset_axes([0.8, 0.8, 0.2, 0.2])
+        self.radio_ax.set_axis_off()
+        self.dbtns = matplotlib.widgets.RadioButtons(self.radio_ax, labels=['Raw','Filtered'], active=0, activecolor='black')
+        _ = self.radio_ax.collections[0].set(sizes=[125,125])
+        _ = [lbl.set(fontsize=12) for lbl in self.dbtns.labels]
+        
+        def toggle_data(label):
+            if label == 'Raw':
+                self.LFP_arr = self.DATA['raw']
+            else:
+                self.LFP_arr = self.DATA['ds']
+            self.LFP = self.LFP_arr[self.ch]
+            
+            self.plot_event_data(event=None)
+            self.canvas.draw_idle()
+            
+        self.dbtns.on_clicked(toggle_data)
         
         ### create additional feature artists
         self.hw_line_kw = dict(color='red', lw=3, zorder=0, solid_capstyle='butt', 
@@ -654,6 +824,7 @@ class EventViewPopup(QtWidgets.QDialog):
         self.DF_ALL = DF_ALL
         self.fig = fig
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.setMinimumWidth(int(pyfx.ScreenRect().width() * 0.5))
         
         # initialize settings widget, populate channel dropdown
         self.evw = EventViewWidget(self.DF_ALL.columns, parent=self)
@@ -665,8 +836,8 @@ class EventViewPopup(QtWidgets.QDialog):
         self.layout.addWidget(self.evw)
         self.setLayout(self.layout)
         
-        qrect = pyfx.ScreenRect(perc_height=0.9)
-        self.setGeometry(qrect)
+        #qrect = pyfx.ScreenRect(perc_height=0.9)
+        #self.setGeometry(qrect)
         
         # connect view widgets
         self.evw.view_grp.buttonToggled.connect(self.show_hide_plot_items)
@@ -765,8 +936,6 @@ class EventViewPopup(QtWidgets.QDialog):
         #status = [self.evw.ch_dropdown.model().item(i).isEnabled() for i in range(self.evw.ch_dropdown.count())]
         #if self.evw.ch_dropdown.currentText() == '10': pdb.set_trace()
         
-        
-    
     def clear_channels(self):
         """ Clear all comparison channels from event plot """
         # clear channel plotting list (except for primary channel)
@@ -776,6 +945,11 @@ class EventViewPopup(QtWidgets.QDialog):
         self.fig.plot_event_data(event=None, twin=None)
         # reset channel dropdown
         self.reset_ch_dropdown()
+    
+    def closeEvent(self, event):
+        self.fig.clear()
+        self.canvas.deleteLater()
+        event.accept()
         
     
 class EventViewWidget(QtWidgets.QFrame):
@@ -797,7 +971,7 @@ class EventViewWidget(QtWidgets.QFrame):
         self.setMidLineWidth(2)
         
         self.vlay = QtWidgets.QVBoxLayout()
-        self.vlay.setSpacing(15)
+        self.vlay.setSpacing(10)
         
         gbox_ss = ('QGroupBox {'
                    'border : 1px solid gray;'
@@ -805,7 +979,7 @@ class EventViewWidget(QtWidgets.QFrame):
                    'font-size : 16pt;'
                    'font-weight : bold;'
                    'margin-top : 10px;'
-                   'padding : 15px 5px 10px 5px;'
+                   'padding : 10px 5px 10px 5px;'
                    '}'
                    
                    'QGroupBox::title {'
@@ -816,34 +990,34 @@ class EventViewWidget(QtWidgets.QFrame):
         
         mode_btn_ss = ('QPushButton {'
                        'background-color : whitesmoke;'
-                       'border : 3px outset gray;'
+                       'border : 2px outset gray;'
                        'border-radius : 2px;'
                        'color : black;'
-                       'padding : 4px;'
+                       'padding : 3px;'
                        'font-weight : bold;'
                        '}'
                        
                        'QPushButton:pressed {'
                        'background-color : dimgray;'
-                       'border : 3px inset gray;'
+                       'border : 2px inset gray;'
                        'color : white;'
                        '}'
                        
                        'QPushButton:checked {'
                        'background-color : darkgray;'
-                       'border : 3px inset gray;'
+                       'border : 2px inset gray;'
                        'color : black;'
                        '}'
                        
                        'QPushButton:disabled {'
                        'background-color : gainsboro;'
-                       'border : 3px outset darkgray;'
+                       'border : 2px outset darkgray;'
                        'color : gray;'
                        '}'
                        
                        'QPushButton:disabled:checked {'
                        'background-color : darkgray;'
-                       'border : 3px inset darkgray;'
+                       'border : 2px inset darkgray;'
                        'color : dimgray;'
                        '}'
                        )
@@ -852,6 +1026,7 @@ class EventViewWidget(QtWidgets.QFrame):
         self.view_gbox = QtWidgets.QGroupBox('VIEW')
         self.view_gbox.setStyleSheet(gbox_ss)
         view_lay = pyfx.InterWidgets(self.view_gbox, 'v')[2]
+        #view_lay.setContentsMargins(0,0,0,0)
         view_lay.setSpacing(10)
         ### show/hide thresholds
         self.thres_vbox = QtWidgets.QVBoxLayout()
@@ -879,7 +1054,7 @@ class EventViewWidget(QtWidgets.QFrame):
         view_lay.addWidget(view_line2)
         ### misc standalone checkboxes
         misc_hbox1 = QtWidgets.QHBoxLayout()
-        misc_hbox1.setContentsMargins(0,0,0,0)
+        #misc_hbox1.setContentsMargins(0,0,0,0)
         misc_hbox1.setSpacing(0)
         self.chLabel_btn = QtWidgets.QCheckBox()
         chLabel_lbl = QtWidgets.QLabel('Highlight data from current channel?')
@@ -980,19 +1155,18 @@ class EventViewWidget(QtWidgets.QFrame):
                 self.feat_vbox.addWidget(chk)
             elif category == 'reference':
                 self.ref_vbox.addWidget(chk)
-        
+
 
 class ChannelSelectionWidget(QtWidgets.QFrame):
+#class ChannelSelectionWidget(QtWidgets.QWidget):
     """ Settings widget for main channel selection GUI """
     
     ch_signal = QtCore.pyqtSignal(int, int, int)
     
-    def __init__(self, channels, event_channels, parent=None):
+    def __init__(self, ddir, nchannels, ntimes, lfp_time, lfp_fs, event_channels, parent=None):
         super().__init__(parent)
-        self.setFrameShape(QtWidgets.QFrame.Box)
-        self.setFrameShadow(QtWidgets.QFrame.Raised)
-        self.setLineWidth(3)
-        self.setMidLineWidth(2)
+        
+        self.ddir = ddir
         
         gbox_ss_main = ('QGroupBox {'
                         'background-color : rgba(220,220,220,100);'  # gainsboro
@@ -1015,41 +1189,63 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
                         'subcontrol-position : top center;'
                         'padding : 1px 4px;' # top, right, bottom, left
                         '}')
+        self.settings_layout = QtWidgets.QVBoxLayout(self)
+        self.settings_layout.setSpacing(10)
         
+        #self.tabBar().setTabSize(self.tabBar().sizeHint().width() // 3)
+        #self.tabBar().setFixedHeight(40)
+        
+        self.tab_widget = QtWidgets.QTabWidget(parent=self)
+        self.tab_widget.setObjectName('tab_widget')
+        #self.tab_widget.setMinimumWidth(25)
+        self.tab_widget.setMovable(True)
+        
+        
+        ######################################################
+        ######################################################
+        ############           TAB 1              ############
+        ######################################################
+        ######################################################
+        
+        
+        self.tab1 = QtWidgets.QFrame()
+        self.tab1.setObjectName('tab1')
+        self.tab1.setFrameShape(QtWidgets.QFrame.Box)
+        self.tab1.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.tab1.setLineWidth(2)
+        self.tab1.setMidLineWidth(2)
+        self.tab_widget.addTab(self.tab1, 'Events')
+        self.vlay = QtWidgets.QVBoxLayout(self.tab1)
+        self.vlay.setSpacing(10)
         # channel selection widgets
-        self.vlay = QtWidgets.QVBoxLayout()
-        self.vlay.setSpacing(20)
+        #self.vlay = QtWidgets.QVBoxLayout()
+        #self.vlay.setSpacing(20)
         
-        # signal freq bands
-        freq_lay = QtWidgets.QHBoxLayout()
-        self.plot_freq_pwr = gi.ShowHideBtn(init_show=False)
-        self.plot_freq_lbl = QtWidgets.QLabel('Show frequency band power')
-        self.plot_freq_lbl.setAlignment(QtCore.Qt.AlignCenter)
-        self.plot_freq_lbl.setWordWrap(True)
-        freq_lay.addWidget(self.plot_freq_pwr)
-        freq_lay.addWidget(self.plot_freq_lbl)
-        self.vlay.addLayout(freq_lay)
         
-        line0 = pyfx.DividerLine()
-        self.vlay.addWidget(line0)
+        ###   SEIZURE WIDGET   ###
         
         # seizures
         self.szr_gbox = QtWidgets.QGroupBox()
-        szr_row = QtWidgets.QHBoxLayout(self.szr_gbox)
-        szr_row.setContentsMargins(0,0,0,0)
+        szr_row = QtWidgets.QGridLayout(self.szr_gbox)
+        #szr_row = QtWidgets.QVBoxLayout(self.szr_gbox)
+        #szr_row.setContentsMargins(0,0,0,0)
         self.szr_show = QtWidgets.QRadioButton('Show seizures')
         self.szr_arrows = gi.EventArrows()
         self.szr_arrows.setEnabled(False)
         self.szr_elim = QtWidgets.QPushButton('X')
+        self.szr_elim.setMaximumWidth(self.szr_elim.minimumSizeHint().height())
         self.szr_elim.setEnabled(False)
-        szr_row.addWidget(self.szr_show)
-        szr_row.addWidget(self.szr_arrows)
-        #szr_row.addWidget(self.szr_elim)
-        self.vlay.addWidget(self.szr_gbox)
+        szr_row.addWidget(self.szr_show, 0, 0)
+        szr_row.addWidget(self.szr_elim, 0, 1)
+        szr_row.addWidget(self.szr_arrows, 1, 0, 1, 2)
         
-        line1 = pyfx.DividerLine()
-        #self.vlay.addWidget(line1)
+        ###   EVENT WIDGETS   ###
         
+        cline_ss = ('QLabel {'
+                    'border : 1px solid transparent;'
+                    'border-bottom : 3px solid %s;'
+                    'max-height : 2px;'
+                    '}')
         # hilus channel widgets
         self.ds_gbox = QtWidgets.QGroupBox('DG SPIKES')
         self.ds_gbox.setStyleSheet(gbox_ss_main)
@@ -1077,16 +1273,12 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         ds_row3.addWidget(self.ds_arrows)
         # colorcode
         ds_cc = QtWidgets.QLabel()
-        ds_cc.setStyleSheet('QLabel {border : 1px solid transparent; border-bottom : 3px solid red}')
+        ds_cc.setStyleSheet(cline_ss % 'red')
         ds_lay.addSpacing(10)
         ds_lay.addLayout(ds_row1)
         ds_lay.addLayout(ds_row2)
         ds_lay.addLayout(ds_row3)
         ds_lay.addWidget(ds_cc)
-        self.vlay.addWidget(self.ds_gbox)
-        
-        line2 = pyfx.DividerLine()
-        #self.vlay.addWidget(line2)
         
         # ripple channel widgets
         self.ripple_gbox = QtWidgets.QGroupBox('RIPPLES')
@@ -1115,16 +1307,12 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         swr_row3.addWidget(self.swr_arrows)
         # colorcode
         swr_cc = QtWidgets.QLabel()
-        swr_cc.setStyleSheet('QLabel {border : 1px solid transparent; border-bottom : 3px solid green}')
+        swr_cc.setStyleSheet(cline_ss % 'green')
         swr_lay.addSpacing(10)
         swr_lay.addLayout(swr_row1)
         swr_lay.addLayout(swr_row2)
         swr_lay.addLayout(swr_row3)
         swr_lay.addWidget(swr_cc)
-        self.vlay.addWidget(self.ripple_gbox)
-        
-        line3 = pyfx.DividerLine()
-        #self.vlay.addWidget(line3)
         
         # theta channel widgets
         self.theta_gbox = QtWidgets.QGroupBox('THETA')
@@ -1147,25 +1335,159 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
         theta_row2.addWidget(self.theta_reset)
         # colorcode
         theta_cc = QtWidgets.QLabel()
-        theta_cc.setStyleSheet('QLabel {border : 1px solid transparent; border-bottom : 3px solid blue}')
+        theta_cc.setStyleSheet(cline_ss % 'blue')
         theta_lay.addSpacing(10)
         theta_lay.addLayout(theta_row1)
         theta_lay.addLayout(theta_row2)
         theta_lay.addWidget(theta_cc)
-        self.vlay.addWidget(self.theta_gbox)
-        
-        line4 = pyfx.DividerLine()
-        #self.vlay.addWidget(line4)
-        
-        self.setLayout(self.vlay)
-        self.ch_inputs = [self.theta_input, self.swr_input, self.hil_input]
-        
         # set min/max channel values
-        self.theta_input.setRange(0, len(channels)-1)
-        self.swr_input.setRange(0, len(channels)-1)
-        self.hil_input.setRange(0, len(channels)-1)
+        self.theta_input.setRange(0, nchannels-1)
+        self.swr_input.setRange(0, nchannels-1)
+        self.hil_input.setRange(0, nchannels-1)
+        self.ch_inputs = [self.theta_input, self.swr_input, self.hil_input]
         # set channels
         self.set_channel_values(*event_channels)
+        
+        self.vlay.addWidget(self.szr_gbox, stretch=0)
+        self.vlay.addWidget(self.ds_gbox, stretch=2)
+        self.vlay.addWidget(self.ripple_gbox, stretch=2)
+        self.vlay.addWidget(self.theta_gbox, stretch=2)
+        
+        
+        ######################################################
+        ######################################################
+        ############           TAB 2              ############
+        ######################################################
+        ######################################################
+        
+        self.tab2 = QtWidgets.QFrame()
+        self.tab2.setObjectName('tab2')
+        self.tab2.setFrameShape(QtWidgets.QFrame.Box)
+        self.tab2.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.tab2.setLineWidth(2)
+        self.tab2.setMidLineWidth(2)
+        self.tab_widget.addTab(self.tab2, 'Notes')
+        self.vlay2 = QtWidgets.QVBoxLayout(self.tab2)
+        self.vlay2.setSpacing(10)
+        
+        ###   FREQUENCY POWER BANDS   ###
+        
+        self.plot_freq_pwr = gi.ShowHideBtn(init_show=False)
+        #self.plot_freq_pwr.setStyleSheet('QPushButton {padding : 5px 10px;}')
+        self.plot_freq_pwr.setStyleSheet('QPushButton {'
+                                          'background-color : whitesmoke;'
+                                          'border : 2px outset gray;'
+                                          'color : black;'
+                                          'image : url(:/icons/double_chevron_left.png);'
+                                          'image-position : left;'
+                                          'padding : 15px 5px;'
+                                          '}'
+                                          
+                                        'QPushButton:checked {'
+                                        'background-color : gainsboro;'
+                                        'border : 2px inset gray;'
+                                        'image : url(:/icons/double_chevron_right.png);'
+                                        '}'
+                                        )
+        self.plot_freq_pwr.setLayoutDirection(QtCore.Qt.LeftToRight)
+        
+        ###   JUMP TO TIMEPOINT OR INDEX   ###
+        
+        trange = (tmin, tmax) = np.array(pyfx.Edges(lfp_time))
+        irange = (imin, imax) = (trange * lfp_fs).astype('int')
+        
+        self.time_gbox = QtWidgets.QGroupBox()
+        time_gbox_lay = QtWidgets.QVBoxLayout(self.time_gbox)
+        self.time_w = gi.LabeledWidget(txt='<b><u>Jump to:</u></b>')
+        time_lay = QtWidgets.QVBoxLayout(self.time_w.qw)
+        self.tjump = gi.LabeledSpinbox('Time', double=True, orientation='h', range=trange, spacing=5)
+        self.ijump = gi.LabeledSpinbox('Index', orientation='h', range=irange, spacing=5)
+        icon = self.style().standardIcon(QtWidgets.QStyle.SP_ArrowForward)
+        jbtns = [self.tjump_btn, self.ijump_btn] = [QtWidgets.QPushButton(), 
+                                                    QtWidgets.QPushButton()]
+        for btn in jbtns:
+            btn.setIcon(icon)
+            btn.setMaximumWidth(btn.minimumSizeHint().height())
+            btn.setFlat(True)
+        self.tjump.layout.addWidget(self.tjump_btn)
+        self.ijump.layout.addWidget(self.ijump_btn)
+        time_lay.addWidget(self.tjump)
+        time_lay.addWidget(self.ijump)
+        time_gbox_lay.addWidget(self.time_w)
+        
+        ###   RECORDING NOTES   ###
+        
+        self.notes_gbox = QtWidgets.QGroupBox()
+        notes_layout = QtWidgets.QVBoxLayout(self.notes_gbox)
+        notes_lbl = QtWidgets.QLabel('<b><u>NOTES</u></b>')
+        self.save_notes_btn = QtWidgets.QToolButton()
+        self.save_notes_btn.setIcon(QtGui.QIcon(':/icons/save.png'))
+        self.save_notes_btn.setIconSize(QtCore.QSize(20,20))
+        self.save_notes_btn.setMaximumWidth(self.save_notes_btn.minimumSizeHint().height())
+        notes_hdr = QtWidgets.QHBoxLayout()
+        notes_hdr.addWidget(notes_lbl)
+        notes_hdr.addWidget(self.save_notes_btn)
+        self.notes_qedit = QtWidgets.QTextEdit()
+        # load notes
+        notes_txt = ephys.read_notes(Path(self.ddir, 'notes.txt'))
+        self.notes_qedit.setPlainText(notes_txt)
+        self.last_saved_notes = str(notes_txt)
+        notes_layout.addLayout(notes_hdr)
+        notes_layout.addWidget(self.notes_qedit)
+        self.save_notes_btn.clicked.connect(self.export_notes)
+        
+        self.vlay2.addWidget(self.plot_freq_pwr, stretch=0)
+        self.vlay2.addWidget(self.time_gbox, stretch=0)
+        self.vlay2.addWidget(self.notes_gbox, stretch=2)
+        
+        
+        ###   TOGGLE PROBES   ###
+        
+        # toggle between probes
+        self.probes_qlist = QtWidgets.QListWidget()
+        self.probes_qlist.setFixedHeight(50)
+        self.probes_qlist.setStyleSheet('QListWidget {'
+                                                  #'background-color : rgba(255,255,255,50);'
+                                                  'border : 2px solid gray;'
+                                                  'padding : 1px;'
+                                                  '}'
+                                                  
+                                                  'QListWidget::item {'
+                                                  #'border : 2px solid rgb(200,200,200);'
+                                                  #'border-radius : 1px;'
+                                                  'min-height : 12px;'
+                                                  'max-height : 12px;'
+                                                  'padding : 5px;'
+                                                  '}'
+                                                  )
+        self.probes_qlist.setSizeAdjustPolicy(self.probes_qlist.AdjustToContents)
+        
+        # save changes
+        bbox = QtWidgets.QVBoxLayout()
+        bbox.setSpacing(2)
+        self.save_btn = QtWidgets.QPushButton('  Save channels  ')
+        self.save_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogSaveButton))
+        self.save_btn.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.save_btn.setStyleSheet('QPushButton {padding : 5px 20px;}')
+        self.save_btn.setDefault(False)
+        self.save_btn.setAutoDefault(False)
+        self.debug_btn = QtWidgets.QPushButton('  debug  ')
+        self.debug_btn.setDefault(False)
+        self.debug_btn.setAutoDefault(False)
+        bbox.addWidget(self.save_btn)
+        bbox.addWidget(self.debug_btn)
+        
+        self.settings_layout.addWidget(self.probes_qlist)
+        self.settings_layout.addWidget(self.tab_widget)
+        self.settings_layout.addLayout(bbox)
+    
+    # self-contained notes saving
+    def export_notes(self):
+        txt = self.notes_qedit.toPlainText()
+        ephys.write_notes(Path(self.ddir,'notes.txt'), txt)
+        print('Notes saved!')
+        # keep track of last save point, use for warning message
+        self.last_saved_notes = str(txt)
 
     
     def set_channel_values(self, theta_chan, ripple_chan, hil_chan):
@@ -1183,24 +1505,27 @@ class ChannelSelectionWidget(QtWidgets.QFrame):
 class ChannelSelectionWindow(QtWidgets.QDialog):
     """ Main channel selection GUI """
     
-    def __init__(self, ddir, iprb=0, parent=None):
+    def __init__(self, ddir, probe_list, iprb=0, parent=None):
         super().__init__(parent)
-        qrect = pyfx.ScreenRect(perc_width=0.85, keep_aspect=False)
+        qrect = pyfx.ScreenRect(perc_width=0.9)
         self.setGeometry(qrect)
         
-        self.init_data(ddir, iprb)
+        self.init_data(ddir, probe_list, iprb)
         self.init_figs()
         self.gen_layout()
         self.connect_signals()
+        
+        # update window title
+        title = f'{os.path.basename(self.ddir)}'
+        self.setWindowTitle(title)
         self.show()
     
     
-    def init_data(self, ddir, iprb):
+    def init_data(self, ddir, probe_list, iprb):
         """ Initialize all recording variables """
         self.ddir = ddir
+        self.probe_list = probe_list
         self.iprb = iprb
-        title = f'{os.path.basename(ddir)} (probe={iprb})'
-        self.setWindowTitle(title)
         
         # load params
         self.PARAMS = ephys.load_recording_params(ddir)
@@ -1209,20 +1534,39 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         # load LFP signals, event dfs, and detection thresholds for all probes
         self.data_list, self.lfp_time, self.lfp_fs = ephys.load_lfp(ddir, '', -1)
         self.swr_list = ephys.load_event_dfs(ddir, 'swr', -1)
-        self.ds_list = ephys.load_event_dfs(ddir, 'ds', -1, mask=True)
+        self.ds_list = ephys.load_event_dfs(ddir, 'ds', -1)
         self.threshold_list = list(np.load(Path(ddir, 'THRESHOLDS.npy'), allow_pickle=True))
         self.std_list = ephys.csv2list(ddir, 'channel_bp_std')
+        self.NCH, self.NTS = self.data_list[0]['raw'].shape
         #self.seizures, _, _ = ephys.load_seizures(ddir)
+        
+        # load AUX channel(s) if they exist
+        self.aux_mx = np.array(())
+        if os.path.exists(Path(ddir, 'AUX.npy')):
+            self.aux_mx = np.load(Path(ddir, 'AUX.npy'))
         
         # select initial probe data
         self.load_probe_data(self.iprb)
+
+
+    def load_probe_data(self, iprb):
+        """ Set data corresponding to the given probe """
+        self.iprb = iprb
+        self.probe = self.probe_list[iprb]
+        self.DATA = dict(self.data_list[iprb])
+        self.SWR_ALL, self.SWR_MEAN = map(deepcopy, self.swr_list[iprb])
+        self.DS_ALL, self.DS_MEAN =  map(deepcopy, self.ds_list[iprb])
+        self.SWR_THRES, self.DS_THRES = dict(self.threshold_list[iprb]).values()
+        self.STD = pd.DataFrame(self.std_list[iprb])
+        self.channels = np.arange(self.DATA['raw'].shape[0])
+        self.seizures, _, _ = ephys.load_iis(self.ddir, iprb)
         
         # load/estimate event channels
-        if os.path.exists(Path(ddir, f'theta_ripple_hil_chan_{self.iprb}.npy')):
-            self.event_channels= np.load(Path(ddir, f'theta_ripple_hil_chan_{self.iprb}.npy'))
+        if os.path.exists(Path(self.ddir, f'theta_ripple_hil_chan_{self.iprb}.npy')):
+            self.event_channels= np.load(Path(self.ddir, f'theta_ripple_hil_chan_{self.iprb}.npy'))
             self.theta_chan, self.ripple_chan, self.hil_chan = self.event_channels
-        elif os.path.exists(Path(ddir, 'theta_ripple_hil_chan.npy')):
-            self.event_channels= np.load(Path(ddir, 'theta_ripple_hil_chan.npy'))
+        elif os.path.exists(Path(self.ddir, 'theta_ripple_hil_chan.npy')):
+            self.event_channels= np.load(Path(self.ddir, 'theta_ripple_hil_chan.npy'))
             self.theta_chan, self.ripple_chan, self.hil_chan = self.event_channels
         else:
             self.theta_chan = np.argmax(self.STD.theta)
@@ -1233,101 +1577,57 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
             self.hil_chan = np.argmax(np.percentile(self.DATA['swr'], 99.9, axis=1))
             self.event_channels = [self.theta_chan, self.ripple_chan, self.hil_chan]
         self.auto_theta_chan, self.auto_ripple_chan, self.auto_hil_chan = self.event_channels.copy()
-        #self.predict_hilus_channel() findme
-        
-        # load AUX channel(s) if they exist
-        self.aux_mx = np.array(())
-        if os.path.exists(Path(ddir, 'AUX.npy')):
-            self.aux_mx = np.load(Path(ddir, 'AUX.npy'))
-            
-
-
-    def load_probe_data(self, iprb):
-        """ Set data corresponding to the given probe """
-        self.iprb = iprb
-        try:
-            self.DATA = dict(self.data_list[iprb])
-        except:
-            pdb.set_trace()
-        self.SWR_ALL, self.SWR_MEAN = map(deepcopy, self.swr_list[iprb])
-        self.DS_ALL, self.DS_MEAN =  map(deepcopy, self.ds_list[iprb])
-        self.SWR_THRES, self.DS_THRES = dict(self.threshold_list[iprb]).values()
-        self.STD = pd.DataFrame(self.std_list[iprb])
-        self.channels = np.arange(self.DATA['raw'].shape[0])
-        self.seizures, _, _ = ephys.load_iis(self.ddir, iprb)
     
+    
+    def SWITCH_THE_PROBE(self, idx):
+        print('switch_the_probe called')
+        self.load_probe_data(idx)
+        
+        kwargs = dict(probe=self.probe, DATA=self.DATA, event_channels=self.event_channels, 
+                      DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, STD=self.STD, seizures=self.seizures)
+        self.main_fig.switch_the_probe(**kwargs)
+        self.widget.set_channel_values(*self.event_channels)
+        
+        
     
     def init_figs(self):
         """ Create main figure, initiate event channel update """
-        kwargs = dict(DATA=self.DATA, lfp_time=self.lfp_time, lfp_fs=self.lfp_fs, 
+        kwargs = dict(probe=self.probe, DATA=self.DATA, lfp_time=self.lfp_time, lfp_fs=self.lfp_fs, 
                       PARAMS=self.PARAMS, event_channels=self.event_channels, 
-                      DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, seizures=self.seizures)
+                      DS_ALL=self.DS_ALL, SWR_ALL=self.SWR_ALL, STD=self.STD, seizures=self.seizures)
         
         # set up figures
-        self.fig = IFigLFP(**kwargs)
-        self.fig2 = IFigLFP2(self.STD, **kwargs)
-        
-        mainwidgets = []
-        for fig in [self.fig, self.fig2]:
-            fig.set_tight_layout(True)
-            sns.despine(fig)
-            # create canvas
-            canvas = FigureCanvas(fig)
-            canvas.setFocusPolicy(QtCore.Qt.ClickFocus)
-            # create toolbar
-            toolbar = NavigationToolbar(canvas, self)
-            toolbar.setOrientation(QtCore.Qt.Vertical)
-            toolbar.setMaximumWidth(30)
-            # initialize event channels
-            fig.channel_changed(*self.event_channels)
-            
-            # create figure widget
-            mainwidget = QtWidgets.QWidget()
-            mainlay = QtWidgets.QHBoxLayout(mainwidget)
-            mainlay.addWidget(toolbar)
-            mainlay.addWidget(canvas)
-            mainwidgets.append(mainwidget)
-            
-        self.mainwidget, self.mainwidget2 = mainwidgets
+        self.main_fig = IFigLFP(**kwargs)
+        sns.despine(self.main_fig.fig)
+        sns.despine(self.main_fig.fig_freq)
+        self.main_fig.channel_changed(*self.event_channels)
+        #self.fig2 = IFigLFP2(self.STD, **kwargs)
             
         
     def gen_layout(self):
         """ Set up layout """
         # create channel selection widget, initialize values
-        self.widget = ChannelSelectionWidget(self.channels, self.event_channels)
-        self.widget.setMaximumWidth(210)
+        self.widget = ChannelSelectionWidget(self.ddir, self.NCH, self.NTS, self.lfp_time, self.lfp_fs, self.event_channels)
+        self.widget.setMaximumWidth(250)
         self.widget.szr_gbox.setVisible(bool(len(self.seizures) > 0))
         
-        # create "save" button
-        bbox = QtWidgets.QVBoxLayout()
-        bbox.setSpacing(2)
-        self.save_btn = QtWidgets.QPushButton('  Save  ')
-        self.save_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogSaveButton))
-        self.save_btn.setLayoutDirection(QtCore.Qt.RightToLeft)
-        self.save_btn.setStyleSheet('QPushButton {padding : 5px 20px;}')
-        self.debug_btn = QtWidgets.QPushButton('  debug  ')
-        bbox.addWidget(self.save_btn)
-        bbox.addWidget(self.debug_btn)
-        self.widget.vlay.addLayout(bbox)
-        bottom_line = pyfx.DividerLine(lw=3, mlw=3)
-        #self.widget.vlay.addWidget(bottom_line)
+        items = [f'probe {i}' for i in range(len(self.probe_list))]
+        self.widget.probes_qlist.addItems(items)
+        self.widget.probes_qlist.setCurrentRow(self.iprb)
         
         # set up layout
         self.centralWidget = QtWidgets.QWidget()
         self.centralLayout = QtWidgets.QHBoxLayout(self.centralWidget)
         self.centralLayout.setContentsMargins(5,5,5,5)
         
-        self.centralLayout.addWidget(self.mainwidget)
-        self.centralLayout.addWidget(self.mainwidget2)
-        self.mainwidget2.hide()
+        self.centralLayout.addWidget(self.main_fig)
         self.centralLayout.addWidget(self.widget)
         self.setLayout(self.centralLayout)
         
-        self.cid  = self.fig.canvas.mpl_connect("key_press_event", self.fig.iw.i.key_step)
-        self.cid2 = self.fig2.canvas.mpl_connect("key_press_event", self.fig2.iw.i.key_step)
-        
         
     def connect_signals(self):
+        # SWITCH_THE_PROBE
+        self.widget.probes_qlist.currentRowChanged.connect(self.SWITCH_THE_PROBE)
         # updated channel inputs
         for item in self.widget.ch_inputs:
             item.valueChanged.connect(self.widget.emit_ch_signal)
@@ -1343,57 +1643,61 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.widget.szr_show.toggled.connect(self.show_hide_events)
         self.widget.ds_show.toggled.connect(self.show_hide_events)
         self.widget.swr_show.toggled.connect(self.show_hide_events)
+        # show given index/timepoint
+        self.widget.tjump_btn.clicked.connect(lambda: self.main_fig.point_jump(self.widget.tjump.value(), 't'))
+        self.widget.ijump_btn.clicked.connect(lambda: self.main_fig.point_jump(self.widget.ijump.value(), 'i'))
         # show next/previous event
-        self.widget.ds_arrows.bgrp.idClicked.connect(lambda x: self.fig.event_jump(x, 'ds'))
-        self.widget.ds_arrows.bgrp.idClicked.connect(lambda x: self.fig2.event_jump(x, 'ds'))
-        self.widget.swr_arrows.bgrp.idClicked.connect(lambda x: self.fig.event_jump(x, 'swr'))
-        self.widget.swr_arrows.bgrp.idClicked.connect(lambda x: self.fig2.event_jump(x, 'swr'))
-        self.widget.szr_arrows.bgrp.idClicked.connect(lambda x: self.fig.event_jump(x, 'szr'))
-        self.widget.szr_arrows.bgrp.idClicked.connect(lambda x: self.fig2.event_jump(x, 'szr'))
+        self.widget.ds_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'ds'))
+        #self.widget.ds_arrows.bgrp.idClicked.connect(lambda x: self.fig2.event_jump(x, 'ds'))
+        self.widget.swr_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'swr'))
+        #self.widget.swr_arrows.bgrp.idClicked.connect(lambda x: self.fig2.event_jump(x, 'swr'))
+        self.widget.szr_arrows.bgrp.idClicked.connect(lambda x: self.main_fig.event_jump(x, 'szr'))
+        #self.widget.szr_arrows.bgrp.idClicked.connect(lambda x: self.fig2.event_jump(x, 'szr'))
         
         # show frequency band plots
         self.widget.plot_freq_pwr.toggled.connect(self.toggle_main_plot)
         # save event channels
-        self.save_btn.clicked.connect(self.save_channels)
-        self.debug_btn.clicked.connect(self.debug)
-    
-    
+        self.widget.save_btn.clicked.connect(self.save_channels)
+        self.widget.debug_btn.clicked.connect(self.debug)
+        self.widget.probes_qlist.setFocus(True)
+        
     def show_hide_events(self):
         """ Set event markers visible or hidden """
         show_ds = bool(self.widget.ds_show.isChecked())
         show_swr = bool(self.widget.swr_show.isChecked())
         show_szr = bool(self.widget.szr_show.isChecked())
-        self.fig.SHOW_DS = bool(show_ds)
-        self.fig2.SHOW_DS = bool(show_ds)
-        self.fig.SHOW_SWR = bool(show_swr)
-        self.fig2.SHOW_SWR = bool(show_swr)
-        self.fig.SHOW_SZR = bool(show_szr)
-        self.fig2.SHOW_SZR = bool(show_szr)
+        self.main_fig.SHOW_DS = bool(show_ds)
+        #self.fig2.SHOW_DS = bool(show_ds)
+        self.main_fig.SHOW_SWR = bool(show_swr)
+        #self.fig2.SHOW_SWR = bool(show_swr)
+        self.main_fig.SHOW_SZR = bool(show_szr)
+        #self.fig2.SHOW_SZR = bool(show_szr)
         
         self.widget.ds_arrows.setEnabled(show_ds)
         self.widget.swr_arrows.setEnabled(show_swr)
         self.widget.szr_arrows.setEnabled(show_szr)
-        a = bool(self.fig.iw.i.val in self.fig.seizures_mid)
+        a = bool(self.main_fig.iw.i.val in self.main_fig.seizures_mid)
         self.widget.szr_elim.setEnabled(bool(show_szr and a))
         
-        self.fig.plot_lfp_data()
-        self.fig2.plot_lfp_data()
-        
+        self.main_fig.plot_lfp_data()
+        #self.fig2.plot_lfp_data()
     
     def toggle_main_plot(self, chk):
         """ Expand/hide frequency band plots """
-        self.mainwidget.setVisible(not chk)
-        self.mainwidget2.setVisible(chk)
+        self.main_fig.canvas_freq.setVisible(chk)
+        self.main_fig.plot_lfp_data()
+        # self.mainwidget.setVisible(not chk)
+        # self.mainwidget2.setVisible(chk)
 
-        tmp = ['Show','Hide'][int(chk)]
-        self.widget.plot_freq_lbl.setText(f'{tmp} frequency band power')
+        #tmp = ['Show','Hide'][int(chk)]
+        #self.widget.plot_freq_lbl.setText(f'{tmp} frequency band power')
         
     
     def update_event_channels(self, a, b, c):
         """ Pass updated event channels from settings widget to figure """
-        self.fig.channel_changed(a,b,c)
-        self.fig2.channel_changed(a,b,c)
-        self.event_channels = self.fig.event_channels
+        self.main_fig.channel_changed(a,b,c)
+        #self.fig2.channel_changed(a,b,c)
+        self.event_channels = self.main_fig.event_channels
         
         
     def reset_ch(self, k):
@@ -1409,7 +1713,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     def view_swr(self):
         """ Launch ripple analysis popup """
         self.ripple_chan = self.widget.swr_input.value()
-        self.swr_fig = IFigSWR(self.ripple_chan, self.SWR_ALL, self.DATA['raw'], #self.DATA['swr'], 
+        self.swr_fig = IFigSWR(self.ripple_chan, self.SWR_ALL, self.DATA, #self.DATA['swr'], 
                                self.lfp_time, self.lfp_fs, self.PARAMS, 
                                thresholds=self.SWR_THRES[self.ripple_chan])
         self.swr_fig.set_tight_layout(True)
@@ -1437,7 +1741,7 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
     def view_ds(self):
         """ Launch DS analysis popup """
         self.hil_chan = self.widget.hil_input.value()
-        self.ds_fig = IFigDS(self.hil_chan, self.DS_ALL, self.DATA['raw'],
+        self.ds_fig = IFigDS(self.hil_chan, self.DS_ALL, self.DATA,
                              self.lfp_time, self.lfp_fs, self.PARAMS, 
                              thresholds=self.DS_THRES[self.hil_chan])
         self.ds_fig.set_tight_layout(True)
@@ -1475,23 +1779,43 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         msgbox = gi.MsgboxSave('Event channels saved!\nExit window?', parent=self)
         res = msgbox.exec()
         if res == QtWidgets.QMessageBox.Yes:
+            self.widget.export_notes()  # automatically save notes
             self.accept()
+    
+    def check_unsaved_notes(self):
+        a = self.widget.notes_qedit.toPlainText()
+        b = self.widget.last_saved_notes
+        if a==b: 
+            return True  # continue closing
+        else:
+            msg = 'Save changes to your notes?'
+            res = gi.MsgboxWarning.unsaved_changes_warning(msg=msg, sub_msg='', parent=self)
+            if res == False:
+                return False  # "Cancel" to abort closing attempt
+            else:
+                if res == -1: # save notes before closing
+                    self.widget.export_notes()
+                return True   # close dialog
+        
+    def reject(self):
+        if self.check_unsaved_notes():
+            super().reject()
     
     def debug(self):
         pdb.set_trace()
+        
 
 
 if __name__ == '__main__':
     ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/JG007_nosort'
     ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/shank3_saved/JG035_het'
-    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/shank3_saved/JG032_het'
-    import sys
-    app = QtWidgets.QApplication(sys.argv)
-    app.setStyle('Fusion')
-    
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/shank3_saved/JG032_het'
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/jh201_stanford'
+    pyfx.qapp()
     #w = hippos()
-    w = ChannelSelectionWindow(ddir, 1)
+    probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
+    w = ChannelSelectionWindow(ddir, probe_group.probes, 1)
     
     w.show()
     w.raise_()
-    sys.exit(app.exec())
+    w.exec()
