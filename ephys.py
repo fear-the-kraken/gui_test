@@ -30,20 +30,6 @@ import icsd
 ##################################################
 
 
-def get_recording_path(ppath='', rec='', txt='Select recording folder'):
-    """ Return base directory and recording folder name """
-    if os.path.exists(os.path.join(ppath, rec)):
-        return ppath, rec
-    _ = QtWidgets.QApplication([])
-    init_ddir = ppath if os.path.exists(ppath) else os.getcwd()
-    ddir = QtWidgets.QFileDialog.getExistingDirectory(None, txt, init_ddir,
-                                                      QtWidgets.QFileDialog.ShowDirsOnly)
-    dir_list = ddir.split(os.sep)
-    rec = dir_list.pop(-1)
-    ppath = os.sep.join(dir_list)
-    return ppath, rec
-
-
 def base_dirs(return_keys=False):
     """ Return default data directories saved in default_folders.txt """
     # Mode 0 for paths only, 1 for keys only
@@ -62,7 +48,7 @@ def write_base_dirs(ddir_list):
             fid.write(k + ' = ' + str(path) + '\n')
 
 
-def read_param_file(filepath='default_params.txt'):
+def read_param_file(filepath='default_params.txt', exclude_fs=False):
     """ Return dictionary of parameters loaded from .txt file """
     with open(filepath, 'r') as f:
         lines = [l.strip() for l in f.readlines()]
@@ -80,8 +66,8 @@ def read_param_file(filepath='default_params.txt'):
         if   val == 'True'  : val = True
         elif val == 'False' : val = False
         PARAMS[k] = val
+    if exclude_fs: _ = PARAMS.pop('lfp_fs')
     return PARAMS
-
 
 def write_param_file(PARAMS, filepath='default_params.txt'):
     """ Save parameter dictionary to .txt file """
@@ -91,6 +77,20 @@ def write_param_file(PARAMS, filepath='default_params.txt'):
     for k,v in PARAMS.items():
         fid.write(f'{k} = {v};' + os.linesep)
     fid.close()
+
+def read_notes(filepath):
+    """ Load any recording notes from .txt file """
+    try:
+        with open(filepath, 'r') as fid:
+            notes_txt = fid.read()
+    except: 
+        notes_txt = ''
+    return notes_txt
+
+def write_notes(filepath, txt):
+    """ Write recording note to .txt file """
+    with open(filepath, 'w') as fid:
+        fid.write(str(txt))
     
 def load_recording_info(ddir):
     """ Load info dictionary from processed recording """
@@ -114,7 +114,7 @@ def save_recording_params(ddir, PARAMS):
     if 'PROCESSED_DATA_FOLDER' in PARAMS.keys() : del PARAMS['PROCESSED_DATA_FOLDER']
     with open(Path(ddir, 'params.pkl'), 'wb') as f:
         pickle.dump(PARAMS, f)
-
+        
 
 def get_openephys_session(ddir):
     """ Return top-level Session object of recording directory $ddir """
@@ -159,6 +159,153 @@ def oeNodes(session, ddir):
             break
     objs['continuous'] = recording.continuous
     return objs
+
+def get_probe_filepaths(ddir):
+    """ List all probe files in folder $ddir """
+    probe_files = []
+    for f in os.listdir(str(ddir)):
+        if os.path.splitext(f)[-1] not in ['.json', '.prb', '.mat']:
+            continue
+        tmp = read_probe_file(str(Path(ddir, f)))
+        if tmp is not None:
+            probe_files.append(f)
+    return probe_files
+        
+
+def read_probe_file(fpath, raise_exception=False):
+    """ Load probe configuration from .json, .mat, or .prb file """
+    if not os.path.exists(fpath):
+        if raise_exception:
+            raise Exception('Probe file does not exist')
+        return
+    # load data according to file extension
+    ext = os.path.splitext(fpath)[-1]
+    try:
+        if ext == '.json':
+            probe = prif.io.read_probeinterface(fpath).probes[0]
+        elif ext == '.prb':
+            probe = prif.io.read_prb(fpath).probes[0]
+        elif ext == '.mat':
+            probe = mat2probe(fpath)
+        # keep probe name consistent with the file name
+        probe.name = os.path.splitext(os.path.basename(fpath))[0].replace('_config','')
+    except:
+        probe = None
+        if raise_exception:
+            raise Exception('Invalid probe file')
+    return probe
+
+        
+def mat2probe(fpath):
+    """ Load probe config from .mat file """
+    file = so.loadmat(fpath, squeeze_me=True)
+    xy_arr = np.array([file['xcoords'], 
+                       file['ycoords']]).T
+    probe = prif.Probe(ndim=int(file['ndim']), 
+                            name=str(file['name']))
+    probe.set_contacts(xy_arr, 
+                       shank_ids   = np.array(file['shankInd']), 
+                       contact_ids = np.array(file['contact_ids']))
+    probe.set_device_channel_indices(np.array(file['chanMap0ind']))
+    return probe
+
+        
+def write_probe_file(probe, fpath):
+    """ Write probe configuration to .json, .mat, .prb, or .csv file """
+    ext = os.path.splitext(fpath)[-1]
+    
+    if ext == '.json':   # best for probeinterface
+        prif.io.write_probeinterface(fpath, probe)
+        
+    elif ext == '.prb':  # loses a bunch of data, but required by some systems
+        probegroup = prif.ProbeGroup()
+        probegroup.add_probe(probe)
+        prif.io.write_prb(fpath, probegroup)
+        
+    elif ext == '.mat':  # preserves data, not automatically handled by probeinterface
+        _ = probe2mat(probe, fpath)
+        
+    elif ext == '.csv':  # straightforward, easy to view (TBD)
+        probe.to_dataframe(complete=True)
+        return False
+    return True
+
+
+def probe2mat(probe, fpath):
+    """ Save probe config as .mat file"""
+    chanMap = probe.device_channel_indices
+    probe_dict = {'chanMap'     : np.array(chanMap + 1), 
+                  'chanMap0ind' : np.array(chanMap),
+                  'connected'   : np.ones_like(chanMap, dtype='int'),
+                  'name'        : str(probe.name),
+                  'shankInd'    : np.array(probe.shank_ids, dtype='int'),
+                  'xcoords'     : np.array(probe.contact_positions[:,0]),
+                  'ycoords'     : np.array(probe.contact_positions[:,1]),
+                  # specific to probeinterface module
+                  'ndim' : int(probe.ndim),
+                  'contact_ids' : np.array(probe.contact_ids, dtype='int')}
+    probe_dict['connected'][np.where(chanMap==-1)[0]] = 0
+    # save file
+    so.savemat(fpath, probe_dict)
+    return True
+
+
+def make_probe_group(probe, n=1):
+    """ For multi-probe recordings, create group of $n probes to map channels """
+    nch = probe.get_contact_count()
+    PG = prif.ProbeGroup()
+    for i in range(n):
+        prb = probe.copy()
+        cids = np.array(probe.contact_ids, dtype='int') + i*nch
+        dids = np.array(probe.device_channel_indices) + i*nch
+        prb.set_contact_ids(cids)
+        prb.set_device_channel_indices(dids)
+        PG.add_probe(prb)
+    return PG
+
+
+def read_array_file(fpath, raise_exception=False):
+    """ Load raw data from .npy, .mat, or .csv file """
+    if not os.path.exists(fpath):
+        if raise_exception:
+            raise Exception('Data file does not exist')
+        return
+    
+    # load data according to file extension
+    ext = os.path.splitext(fpath)[-1]
+    try:
+        if ext == '.npy':
+            data = np.load(fpath)
+        elif ext == '.mat':
+            matfile = so.loadmat(fpath, squeeze_me=True)
+            # find the real data
+            data_dict = {}
+            for k,v in matfile.items():
+                if k.startswith('__'): continue
+                if not hasattr(v, '__iter__'): continue
+                if len(v) == 0: continue
+                if np.array(v).ndim != 2: continue
+                data_dict[k] = v
+            if len(data_dict) == 1:
+                data = list(data_dict.values())[0]
+            elif len(data_dict) > 1:
+                keys = list(data_dict.keys())
+                print('')
+                print('The following keys represent 2-dimensional data arrays:')
+                print(', '.join(keys))
+                print('')
+                res = input('Which one corresponds to your data?  -->  ')
+                if res in keys:
+                    data = data_dict[res]
+                else:
+                    raise Exception(f'{res} is not a key in the dataset')
+            elif len(data_dict) == 0:
+                raise Exception('No 2-dimensional arrays found in the dataset')
+    except:
+        data = None
+        if raise_exception:
+            raise Exception('Invalid data file')
+    return data
 
 
 def load_lfp(ddir, key='', iprb=-1):
@@ -260,110 +407,6 @@ def load_event_dfs(ddir, event, iprb=-1, mask=False):
     else:
         return LLIST
     
-    
-##################################################
-########        PROBE CONFIGURATION       ########
-##################################################
-
-def get_probe_filepaths(ddir):
-    """ List all probe files in folder $ddir """
-    probe_files = []
-    for f in os.listdir(str(ddir)):
-        if os.path.splitext(f)[-1] not in ['.json', '.prb', '.mat']:
-            continue
-        tmp = read_probe_file(str(Path(ddir, f)))
-        if tmp is not None:
-            probe_files.append(f)
-    return probe_files
-    
-
-def read_probe_file(fpath):
-    """ Load probe configuration from .json, .mat, or .prb file """
-    if not os.path.exists(fpath):
-        return
-    # load data according to file extension
-    ext = os.path.splitext(fpath)[-1]
-    try:
-        if ext == '.json':
-            probe = prif.io.read_probeinterface(fpath).probes[0]
-        elif ext == '.prb':
-            probe = prif.io.read_prb(fpath).probes[0]
-        elif ext == '.mat':
-            probe = mat2probe(fpath)
-        # keep probe name consistent with the file name
-        probe.name = os.path.splitext(os.path.basename(fpath))[0].replace('_config','')
-    except:
-        probe = None
-    return probe
-
-        
-def mat2probe(fpath):
-    """ Load probe config from .mat file """
-    file = scipy.io.loadmat(fpath, squeeze_me=True)
-    xy_arr = np.array([file['xcoords'], 
-                       file['ycoords']]).T
-    probe = prif.Probe(ndim=int(file['ndim']), 
-                            name=str(file['name']))
-    probe.set_contacts(xy_arr, 
-                       shank_ids   = np.array(file['shankInd']), 
-                       contact_ids = np.array(file['contact_ids']))
-    probe.set_device_channel_indices(np.array(file['chanMap0ind']))
-    return probe
-        
-        
-def write_probe_file(probe, fpath):
-    """ Write probe configuration to .json, .mat, .prb, or .csv file """
-    ext = os.path.splitext(fpath)[-1]
-    
-    if ext == '.json':   # best for probeinterface
-        prif.io.write_probeinterface(fpath, probe)
-        
-    elif ext == '.prb':  # loses a bunch of data, but required by some systems
-        probegroup = prif.ProbeGroup()
-        probegroup.add_probe(probe)
-        prif.io.write_prb(fpath, probegroup)
-        
-    elif ext == '.mat':  # preserves data, not automatically handled by probeinterface
-        _ = probe2mat(probe, fpath)
-        
-    elif ext == '.csv':  # straightforward, easy to view (TBD)
-        probe.to_dataframe(complete=True)
-        return False
-    return True
-
-
-def probe2mat(probe, fpath):
-    """ Save probe config as .mat file"""
-    chanMap = probe.device_channel_indices
-    probe_dict = {'chanMap'     : np.array(chanMap + 1), 
-                  'chanMap0ind' : np.array(chanMap),
-                  'connected'   : np.ones_like(chanMap, dtype='int'),
-                  'name'        : str(probe.name),
-                  'shankInd'    : np.array(probe.shank_ids, dtype='int'),
-                  'xcoords'     : np.array(probe.contact_positions[:,0]),
-                  'ycoords'     : np.array(probe.contact_positions[:,1]),
-                  # specific to probeinterface module
-                  'ndim' : int(probe.ndim),
-                  'contact_ids' : np.array(probe.contact_ids, dtype='int')}
-    probe_dict['connected'][np.where(chanMap==-1)[0]] = 0
-    # save file
-    so.savemat(fpath, probe_dict)
-    return True
-
-
-def make_probe_group(probe, n=1):
-    """ For multi-probe recordings, create group of $n probes to map channels """
-    nch = probe.get_contact_count()
-    PG = prif.ProbeGroup()
-    for i in range(n):
-        prb = probe.copy()
-        cids = np.array(probe.contact_ids, dtype='int') + i*nch
-        dids = np.array(probe.device_channel_indices) + i*nch
-        prb.set_contact_ids(cids)
-        prb.set_device_channel_indices(dids)
-        PG.add_probe(prb)
-    return PG
-
 
 ##################################################
 ########         DATA MANIPULATION        ########
