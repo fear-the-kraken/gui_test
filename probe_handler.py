@@ -22,7 +22,6 @@ import probeinterface as prif
 from probeinterface.plotting import plot_probe, plot_probe_group
 import pdb
 # custom modules
-os.chdir('/Users/amandaschott/Desktop/gui_test')
 import pyfx
 import ephys
 import gui_items as gi
