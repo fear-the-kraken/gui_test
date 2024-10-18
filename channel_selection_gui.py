@@ -195,8 +195,11 @@ class IFigLFP(QtWidgets.QWidget):
         self.fig_freq = matplotlib.figure.Figure()
         #gridspec2 = matplotlib.gridspec.GridSpec(1, 3, figure=self.fig_freq)
         fax0 = self.fig_freq.add_subplot(131)
+        fax0.autoscale(enable=True, axis='x', tight=True)
         fax1 = self.fig_freq.add_subplot(132, sharey=fax0)
+        fax1.autoscale(enable=True, axis='x', tight=True)
         fax2 = self.fig_freq.add_subplot(133, sharey=fax1)
+        fax2.autoscale(enable=True, axis='x', tight=True)
         self.faxs = [fax0, fax1, fax2]
         self.ax.sharey(fax0)
         
