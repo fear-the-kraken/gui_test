@@ -1,0 +1,4 @@
+RAW_DATA = /Users/amandaschott/Dropbox/Farrell_Programs/raw_data
+PROCESSED_DATA = /Users/amandaschott/Dropbox/Farrell_Programs/stanford/deepak_saved
+PROBE_FILES = /Users/amandaschott/Desktop/gui_test/probe_configs
+DEFAULT_PROBE = /Users/amandaschott/Desktop/gui_test/probe_configs/Stanford32_config.json
