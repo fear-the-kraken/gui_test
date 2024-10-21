@@ -65,6 +65,7 @@ class IFigLFP(QtWidgets.QWidget):
         self.init_event_items()  # create event indexes/trains/etc
         
         # create subplots and interactive widgets
+        self.plot_height = pyfx.ScreenRect(perc_height=0.75).height()
         self.create_subplots(twin=twin)
         
         self.fig.set_tight_layout(True)
@@ -82,14 +83,21 @@ class IFigLFP(QtWidgets.QWidget):
         
         self.connect_mpl_widgets()
         
-        self.plot_row = QtWidgets.QHBoxLayout()
-        self.plot_row.addWidget(self.toolbar, stretch=0)
-        self.plot_row.addWidget(self.canvas, stretch=5)
-        self.plot_row.addWidget(self.canvas_freq, stretch=3)
+        self.plot_row = QtWidgets.QWidget()
+        self.plot_row.setFixedHeight(self.plot_height)
+        self.plot_row_hlay = QtWidgets.QHBoxLayout(self.plot_row)
+        self.plot_row_hlay.addWidget(self.toolbar, stretch=0)
+        self.plot_row_hlay.addWidget(self.canvas, stretch=5)
+        self.plot_row_hlay.addWidget(self.canvas_freq, stretch=3)
+        
+        self.qscroll = QtWidgets.QScrollArea()
+        self.qscroll.setWidgetResizable(True)
+        self.qscroll.setWidget(self.plot_row)
         
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.addWidget(self.canvas_w)
-        self.layout.addLayout(self.plot_row)
+        self.layout.addWidget(self.qscroll)
+        #self.layout.addLayout(self.plot_row)
         self.canvas_freq.hide()
         
     
@@ -108,9 +116,9 @@ class IFigLFP(QtWidgets.QWidget):
                                                     direction='horizontal',
                                                     button = 1,
                                                     useblit=True,
-                                                    interactive = True,
+                                                    interactive=True,
                                                     drag_from_anywhere=True,
-                                                    props = dict(fc='red', ec='black', lw=5, alpha=0.5))
+                                                    props=dict(fc='red', ec='black', lw=5, alpha=0.5))
         
         def on_press(event):
             # update current timepoint with arrow keys 
@@ -155,10 +163,11 @@ class IFigLFP(QtWidgets.QWidget):
     def create_subplots(self, twin):
         """ Set up data and widget subplot axes """
         
-        self.fig_w = matplotlib.figure.Figure()#plt.figure()
-        gridspec = matplotlib.gridspec.GridSpec(2, 2, figure=self.fig_w)
+        self.fig_w = matplotlib.figure.Figure()
+        gridspec = matplotlib.gridspec.GridSpec(2, 3, figure=self.fig_w)
         self.sax0 = self.fig_w.add_subplot(gridspec[0,0])
         self.sax1 = self.fig_w.add_subplot(gridspec[0,1])
+        self.sax2 = self.fig_w.add_subplot(gridspec[0,2])
         #self.bax = self.fig_w.add_subplot(gridspec[0,2])
         self.tax = self.fig_w.add_subplot(gridspec[1,:])
         # set slider params
@@ -167,12 +176,15 @@ class IFigLFP(QtWidgets.QWidget):
                     valinit=int(len(self.lfp_time)/2), initcolor='none')
         iwin_kw = dict(valmin=1, valmax=int(3*self.lfp_fs), valstep=1, valinit=iwin, initcolor='none')
         ycoeff_kw = dict(valmin=-50, valmax=50, valstep=1, valinit=0, initcolor='none')
+        yfig_kw = dict(valmin=0, valmax=int(5*self.plot_height), valstep=1, valinit=0, initcolor='none')
         
         # create sliders
-        iwin_sldr   = matplotlib.widgets.Slider(self.sax0, 'X', **iwin_kw)
+        iwin_sldr = matplotlib.widgets.Slider(self.sax0, 'X', **iwin_kw)
         iwin_sldr.valtext.set_visible(False)
         ycoeff_sldr = matplotlib.widgets.Slider(self.sax1, 'Y', **ycoeff_kw)
         ycoeff_sldr.valtext.set_visible(False)
+        yfig_sldr = matplotlib.widgets.Slider(self.sax2, 'Z', **yfig_kw) #findme
+        yfig_sldr.valtext.set_visible(False)
         i_sldr = gi.CSlider(self.tax, 'i', **i_kw)
         i_sldr.nsteps = int(iwin/2)
         i_sldr.valtext.set_visible(False)
@@ -182,10 +194,11 @@ class IFigLFP(QtWidgets.QWidget):
         #                                              activecolor='black')#, radio_props=dict(s=50))
         
         # connect slider signals
-        self.iw = pd.Series(dict(i=i_sldr, iwin=iwin_sldr, ycoeff=ycoeff_sldr))#, btns=radio_btns))
+        self.iw = pd.Series(dict(i=i_sldr, iwin=iwin_sldr, ycoeff=ycoeff_sldr, yfig=yfig_sldr))#, btns=radio_btns))
         self.iw.i.on_changed(self.plot_lfp_data)
         self.iw.iwin.on_changed(self.plot_lfp_data)
         self.iw.ycoeff.on_changed(self.plot_lfp_data)
+        self.iw.yfig.on_changed(lambda val: self.plot_row.setFixedHeight(int(self.plot_height + val)))
         # if isinstance(self.iw.btns, matplotlib.widgets.RadioButtons):
         #     self.iw.btns.on_clicked(self.plot_lfp_data)
         
@@ -1591,7 +1604,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         self.main_fig.switch_the_probe(**kwargs)
         self.widget.set_channel_values(*self.event_channels)
         
-        
     
     def init_figs(self):
         """ Create main figure, initiate event channel update """
@@ -1604,7 +1616,6 @@ class ChannelSelectionWindow(QtWidgets.QDialog):
         sns.despine(self.main_fig.fig)
         sns.despine(self.main_fig.fig_freq)
         self.main_fig.channel_changed(*self.event_channels)
-        #self.fig2 = IFigLFP2(self.STD, **kwargs)
             
         
     def gen_layout(self):
