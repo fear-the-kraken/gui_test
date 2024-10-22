@@ -354,7 +354,7 @@ class DS_CSDWidget(QtWidgets.QFrame):
         # DBSCAN: epsilon, min samples
         eps_lbl = QtWidgets.QLabel('Epsilon (\u03B5)')
         self.eps_sbox = QtWidgets.QDoubleSpinBox()
-        self.eps_sbox.setDecimals(1)
+        self.eps_sbox.setDecimals(2)
         self.eps_sbox.setSingleStep(0.1)
         minN_lbl = QtWidgets.QLabel('Min. samples')
         self.minN_sbox = QtWidgets.QSpinBox()
