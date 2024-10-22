@@ -88,8 +88,10 @@ def load_openephys_data(ddir):
     # load raw signals (uV)
     first,last = pyfx.Edges(continuous.sample_numbers)
     raw_signal_array = np.array([x*bv for x,bv in zip(continuous.get_samples(0, last-first+1).T, bit_volts)])
-    A,B = ipri[[0,-1]] + [0,1]
-    pri_mx = raw_signal_array[A:B]
+    if ipri.size > 0:
+        A,B = ipri[[0,-1]] + [0,1]
+        pri_mx = raw_signal_array[A:B]
+    else: pri_mx = np.array([])
     # look for aux channels
     if iaux.size > 0:
         A_AUX, B_AUX = iaux[[0,-1]] + [0,1]
