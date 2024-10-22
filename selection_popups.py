@@ -553,8 +553,11 @@ class RawArrayPopup(QtWidgets.QDialog):
         self.cols_w = gi.LabeledCombobox(f'Columns (<code>n={ncols:,}</code>)')
         self.cols_w.addItems(['Channels', 'Timepoints'])
         self.cols_w.setCurrentIndex(int(ncols > nrows))
+        self.order_w = gi.LabeledCombobox('Channel order')
+        self.order_w.addItems(['Shallow \u2192 Deep', 'Deep \u2192 Shallow'])
         dims_hlay.addWidget(self.rows_w)
         dims_hlay.addWidget(self.cols_w)
+        dims_hlay.addWidget(self.order_w)
         
         ###   RECORDING PARAMS
         
@@ -576,7 +579,7 @@ class RawArrayPopup(QtWidgets.QDialog):
         # units
         #rec_hlay2 = QtWidgets.QHBoxLayout()
         self.units_w = gi.LabeledCombobox('Units')
-        self.units_w.addItems(['uV', 'mV', 'V'])
+        self.units_w.addItems(['uV', 'mV', 'V', 'kV'])
         rec_hlay1.addWidget(self.units_w)
         rec_lay.addLayout(rec_hlay1)
 
@@ -633,6 +636,8 @@ class RawArrayPopup(QtWidgets.QDialog):
     def accept(self):
         if self.rows_w.currentIndex() == 1:
             self.data = self.data.T
+        if self.order_w.currentIndex() == 1:
+            self.data = self.data[::-1]
         super().accept()
     
     @classmethod
@@ -1532,8 +1537,8 @@ if __name__ == '__main__':
     # lay.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
     # lay.addWidget(gbox)
     
-    popup = BaseFolderPopup()
-    #popup = RawArrayPopup(arr)
+    #popup = BaseFolderPopup()
+    popup = RawArrayPopup(arr)
     #popup = RawDirectorySelectionPopup()
     
     popup.show()
