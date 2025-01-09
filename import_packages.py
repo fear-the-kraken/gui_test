@@ -21,6 +21,7 @@ import seaborn
 import colorsys
 import IPython
 import copy
+import bisect
 import quantities
 import sklearn
 import time

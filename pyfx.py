@@ -11,12 +11,13 @@ import numpy as np
 import matplotlib.colors as mcolors
 import colorsys
 import matplotlib.pyplot as plt
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 import pdb
 
 ##################################################
 ########         GENERAL FUNCTIONS        ########
 ##################################################
+
 
 def Downsample(arr, n):
     """ Downsample 2D input $arr by factor of $n """
@@ -25,7 +26,7 @@ def Downsample(arr, n):
 
 def Normalize(collection):
     """ Normalize data between 0 and 1 """
-    Max=max(collection)
+    Max=np.nanmax(collection)
     Min=min(collection)
     return np.array([(i-Min)/(Max-Min) for i in collection])
 
@@ -53,11 +54,12 @@ def MinMax(collection):
     """ Return (min,max) values in collection, excluding NaNs """
     return (np.nanmin(collection), np.nanmax(collection))
 
-def Limit(collection, mode=2, pad=0.01):
-    """ Return lower and/or upper data limits of collection plus padding """
-    if np.array(collection).size > 0:
+def Limit(collection, mode=2, pad=0.01, sign=1):
+    """ Return lower and/or upper data limits of collection (+/- padding) """
+    collection = np.array(collection)
+    if collection.size > 0:
         min_max = MinMax(collection)
-        vpad = np.ptp(collection[~np.isnan(collection)]) * pad
+        vpad = np.ptp(collection[~np.isnan(collection)]) * pad * sign
         vmin, vmax = np.add(min_max, (-vpad, vpad))
     else:
         vmin, vmax = None,None
@@ -75,6 +77,10 @@ def SymLimit(collection, pad=0.0):
 def InRange(num, nmin, nmax):
     """ Return whether the value $num falls between (min, max) bounds """
     return (num >= nmin) and (num <= nmax)
+
+def AllInRange(collection, nmin, nmax):
+    """ Return whether all values in $collection fall between (min, max) bounds """
+    return (min(collection) >= nmin) and (max(collection) <= nmax)
     
     
 def CenterWin(collection, n, total=True):
@@ -86,6 +92,25 @@ def CenterWin(collection, n, total=True):
     if N % 2 > 0:
         ii = np.append(ii, ctr+nwin)
     return ii, collection[ii]
+
+def get_sequences(idx, ibreak=1) :  
+    """
+    get_sequences(idx, ibreak=1)
+    idx     -    np.vector of indices
+    @RETURN:
+    seq     -    list of np.vectors
+    """
+    diff = idx[1:] - idx[0:-1]
+    breaks = np.nonzero(diff>ibreak)[0]
+    breaks = np.append(breaks, len(idx)-1)
+    
+    seq = []    
+    iold = 0
+    for i in breaks:
+        r = list(range(iold, i+1))
+        seq.append(idx[r])
+        iold = i+1
+    return seq
 
 
 ##################################################
@@ -113,15 +138,20 @@ def butter_bandpass_filter(data, lowcut, highcut, lfp_fs, order=3, axis=-1):
 ##################################################
 
 
-def Cmap(data, cmap=plt.cm.coolwarm, alpha=1.0):
+def Cmap(data, cmap=plt.cm.coolwarm, norm_data=None, alpha=1.0, use_alpha=False):
     """ Return RGBA array (N x 4) of colors mapped from $data values """
+    if norm_data is None:
+        norm_data = data
     try:
-        normal = plt.cm.colors.Normalize(np.nanmin(data), np.nanmax(data))
+        normal = plt.cm.colors.Normalize(np.nanmin(norm_data), np.nanmax(norm_data))
         arr = cmap(normal(data))
         arr[:, 3] = alpha
-        return arr
+        if use_alpha: return arr
+        return arr[:, 0:3]
     except:
+        if use_alpha: return np.ones((len(data), 4))
         return np.ones((len(data), 4))
+
     
 def truncate_cmap(cmap, minval=0.0, maxval=1.0, n=100):
     new_cmap = mcolors.LinearSegmentedColormap.from_list(
@@ -129,21 +159,86 @@ def truncate_cmap(cmap, minval=0.0, maxval=1.0, n=100):
         cmap(np.linspace(minval, maxval, n)))
     return new_cmap
 
-def get_rgb(c, cscale=255):
-    """ Convert input color to RGB values, scaled from 0-255 or 0-1 """
-    if isinstance(c, str): 
-        c = mcolors.to_rgb(c)  # string --> rgb
-    rgb = np.array(c, dtype='float')
-    if any(rgb > 1):
-        rgb /= 255  # scale 0-1
-    if cscale == 255:
-        rgb = np.round(rgb * 255).astype('int')  # scale 0-255
-    return rgb
+
+def color2rgba(c):
+    """ Convert input color to 4-element RGBA array, scaled 0-1 """
+    import re
+                
+    def rgb_str(c):
+        fmt = '%s' + re.escape("(") + '(.*)' + re.escape(")")  # "rgb(...)" format
+        fx  = lambda r: [*map(float, r[0].replace(' ','').split(','))]
+        fx2 = lambda k: fx(re.findall(fmt % k, c))
+        try:  # convert string (e.g. "255, 0, 150") to numerical values
+            try     : res = fx2('rgb')
+            except  : res = fx2('rgba')
+            return np.array(res)
+        except:
+            return None
+    # convert input to RGBA tuple
+    if isinstance(c, str):
+        try    : C = np.array(mcolors.to_rgba(c))  # color name/hex string --> rgba
+        except : C = np.array(rgb_str(c))          # QtStyleSheets string  --> rgb (or None)
+    elif isinstance(c, QtCore.Qt.GlobalColor):  # global Qt color --> rgba
+        C = np.array(QtGui.QColor(c).getRgb())
+    # RGB(A) values --> check for non-numerical elements, get rid of extra dimensions
+    elif type(c) in [list,tuple,np.ndarray]:
+        try    : C = np.array(c, dtype='float').reshape(-1)
+        except : C = None
+    else: C = None
     
+    try:  # validate RGB tuple, convert to array for scaling
+        assert (len(C) in [3,4]) and (AllInRange(C, 0, 255))
+        RGBA = np.array(C, dtype='float32')
+    except: 
+        return None
+    if any(RGBA > 1)  : RGBA = np.array(RGBA / 255.)  # scale 0-1
+    if len(RGBA) == 3 : RGBA = np.append(RGBA, 1.0)   # add missing alpha value
+    return RGBA
+
+def rgb1(c, alpha=False, dtype=tuple):
+    """ Return RGB(A) tuple (0-1) """
+    rgba_1 = color2rgba(c)
+    if alpha: return dtype(rgba_1)
+    return dtype(rgba_1[0:3])
+
+def rgb255(c, alpha=False, dtype=tuple):
+    """ Return RGB(A) tuple (0-255) """
+    rgba_1 = rgb1(c, alpha, dtype=np.array)
+    rgb_255 = np.array(rgba_1 * 255).astype('int32')
+    return dtype(rgb_255)
+
+def qstyle_rgb(c, alpha=False):
+    """ Return RGB(A) string for QStyleSheets """
+    rgb_255 = (rgb255(c, alpha, dtype=tuple))
+    if alpha: return 'rgba' + str(rgb_255)
+    return 'rgb' + str(rgb_255)
+
+def get_hex(c):
+    return mcolors.rgb2hex(rgb1(c))#, keep_alpha=True)
+
+def alpha_like(c, alpha=0.5, bg='white', dtype=tuple):
+    if alpha > 1: alpha /= 255.
+    rgba = rgb1(c, alpha=True, dtype=list)
+    # match input RGBA if given, otherwise use $alpha param
+    fx = lambda a: a if a<1 else alpha
+    rgb,a = [fx(rgba.pop(-1)), np.array(rgba)][::-1]
+    # interpolate between color and background to approximate alpha
+    bg = rgb1(bg, dtype=np.array)
+    new_rgb1 = (1.-a) * bg + a*rgb
+    return dtype(new_rgb1)
+
+def Cmap_alpha(cmap, alpha):
+    return np.c_[cmap[:, 0:3], np.ones(len(cmap))*alpha]
+    
+def Cmap_alpha_like(cmap, alpha):
+    converted_c = [*map(lambda c: alpha_like(c, alpha, dtype=np.array), cmap)]
+    return np.array(converted_c)
+
 
 def hue(c, percent, mode=1, cscale=255, alpha=1, res='tuple'):
     """ Adjust input color tint (mode=1), shade (0), or saturation (0.5) """
-    rgb = get_rgb(c, cscale=1)[0:3]
+    rgb = rgb1(c, alpha=False, dtype=np.array)
+    #rgb = get_rgb(c, cscale=1)[0:3]
     if mode == 1     : tg = np.array([1., 1., 1.])  # lighten color
     elif mode == 0   : tg = np.array([0., 0., 0.])  # darken color
     elif mode == 0.5 : tg = rgb.mean()              # de-intensify color
@@ -207,6 +302,7 @@ def qapp():
     """ Check for an existing QApplication instance """
     app = QtWidgets.QApplication.instance()
     if not app: 
+        print('qapp creating a new QApplication instance')
         app = QtWidgets.QApplication(sys.argv)
         app.setStyle('Fusion')
         app.setQuitOnLastWindowClosed(True)
@@ -220,18 +316,20 @@ def layout_items(qlayout):
 def stealthy(widget, val):
     """ Lazy method for updating widgets without triggering signals  """
     widget.blockSignals(True)
-    try: widget.setValue(val)                   # spinboxes
+    try: widget.setValue(val)                       # spinbox value
     except:
-        try: widget.setCurrentText(val)         # dropdowns
+        try: widget.setRange(*val)                  # spinbox range
         except:
-            try: widget.setPlainText(val)       # text edits
+            try: widget.setCurrentText(val)         # dropdown item
             except:
-                try: widget.setText(val)        # line edits
+                try: widget.setPlainText(val)       # text edit content
                 except:
-                    try: widget.setChecked(val) # buttons
+                    try: widget.setText(val)        # line edit content
                     except:
-                        pdb.set_trace()
-                        print(f'Could not set value for widget {widget}')
+                        try: widget.setChecked(val) # button check
+                        except:
+                            pdb.set_trace()
+                            print(f'Could not set value for widget {widget}')
     widget.blockSignals(False)
 
 class DividerLine(QtWidgets.QFrame):
@@ -261,8 +359,20 @@ def InterWidgets(parent, orientation='v'):
     return interlayout, interwidget, layout
         
 
-def ScreenRect(perc_width=1, perc_height=1, keep_aspect=True):
+def ScreenRect_V1(perc_width=1, perc_height=1, keep_aspect=True):
     """ Return QRect box centered and scaled relative to screen geometry """
+    screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
+    if keep_aspect:
+        perc_width, perc_height = [min([perc_width, perc_height])] * 2
+    app_width = int(screen_rect.width() * perc_width)
+    app_height = int(screen_rect.height() * perc_height)
+    app_x = int((screen_rect.width() - app_width) / 2)
+    app_y = int((screen_rect.height() - app_height) / 2)
+    qrect = QtCore.QRect(app_x, app_y, app_width, app_height)
+    return qrect
+
+def ScreenRect(perc_width=1, perc_height=1, keep_aspect=True):
+    qapp()
     screen_rect = QtWidgets.QDesktopWidget().screenGeometry()
     if keep_aspect:
         perc_width, perc_height = [min([perc_width, perc_height])] * 2
@@ -275,23 +385,8 @@ def ScreenRect(perc_width=1, perc_height=1, keep_aspect=True):
 
 
 def get_ddir():
-    app = QtWidgets.QApplication(sys.argv)
+    qapp()
     res = QtWidgets.QFileDialog().getExistingDirectory(None, '', '', 
                                                        QtWidgets.QFileDialog.DontUseNativeDialog)
     return res
     
-
-
-# if __name__ == '__main__':
-#     import sys
-#     app = QtWidgets.QApplication(sys.argv)
-#     app.setStyle('Fusion')
-    
-#     #w = hippos()
-#     w = QtWidgets.QFileDialog().getExistingDirectory(None, '', '', QtWidgets.QFileDialog.DontUseNativeDialog)
-    
-#     w.show()
-#     w.raise_()
-    
-#     res = w.exec()
-#     #sys.exit(app.exec())

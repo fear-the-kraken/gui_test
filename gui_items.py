@@ -138,22 +138,8 @@ def info2text(info, rich=True):
                 fmt % ('tstart',    '%.2f s' % info['tstart']),
                 fmt % ('tend',      '%.2f s' % info['tend']),
                 fmt % ('duration',  '%.2f s' % info['dur'])]
-        
-    # info popup title '<hr width="70%">'
-    #'<p style="line-height:30%; vertical-align:middle;">'
-    #'<hr align="center"; width="70%"></p>'
-    #<div> <p align="center"; style="background-color:green;">' + ; width="60%"
-    header = (#'<hr height="5px"; style="background-color:yellow; color:blue; border:5px solid orange;">'
-              #'<hr width="60%">'
-              # '<p style="background-color:red; border:5px solid black;">'
-              # #'nekkid'
-              # #'***'
-              # '<td style="border:2px solid green;"><hr></td>'
-              # '</p>'
+    header = (
               '<h2 align="center"; style="background-color:#f2f2f2; border:2px solid red; padding:100px;"><tt>Recording Info</tt></h2>'
-              #'<p style="background-color:none;">'
-              #'<hr style="border:5px solid black">')
-              #'---')
               )
     
     info_text = ('<body style="background-color:#e6e6e6;">' + header + 
@@ -164,8 +150,6 @@ def info2text(info, rich=True):
                 ''.join(rec_rows)   + '</table>' + '</body')
     
     return info_text
-
-
 
 
 def unique_fname(ddir, base_name):
@@ -180,6 +164,75 @@ def unique_fname(ddir, base_name):
         i += 1
     return fname
 
+
+class MainSlider(matplotlib.widgets.Slider):
+    """ Slider with enable/disable function """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.nsteps = 500
+        self.init_style()
+        
+    def init_style(self):
+        self._handle._markersize = 12
+        self._handle._markeredgewidth = 1
+        self.vline.set_color('none')
+        self.valtext.set_visible(False)
+        
+        # baseline
+        self.track_fc = '#d3d3d3'     # 'lightgray', (211, 211, 211)
+        self.poly_fc  = '#3366cc'     # medium-light blue (51, 102, 204)
+        self.handle_mec = '#a9a9a9'   # 'darkgray', (169, 169, 169)
+        self.handle_mfc = '#ffffff'   # 'white', (255, 255, 255)
+        # disabled
+        self.track_fc_off = '#d3d3d3' # 'lightgray', (211, 211, 211)
+        self.poly_fc_off  = '#d3d3d3' # 'lightgray', (211, 211, 211)
+        self.handle_mec_off = '#a9a9a9'   # 'darkgray', (169, 169, 169)
+        self.handle_mfc_off = '#dcdcdc'   # 'gainsboro', (220, 220, 220)
+        self.track_alpha_off   = 0.3
+        self.poly_alpha_off    = 0.5
+        self.handle_alpha_off  = 0.5
+        self.valtext_alpha_off = 0.2
+        self.label_alpha_off   = 0.2
+        self.set_style()
+    
+    def init_main_style(self, **kwargs):
+        self._handle._markersize = 20
+        self.poly_fc = '#4b0082'  # 'indigo', (75, 0, 130)
+        if 'nsteps' in kwargs: self.nsteps = kwargs['nsteps']
+        self.set_style()
+    
+    def set_style(self):
+        self.track.set_facecolor(self.track_fc)
+        self.poly.set_facecolor(self.poly_fc)
+        self._handle.set_markeredgecolor(self.handle_mec)
+        self._handle.set_markerfacecolor(self.handle_mfc)
+        self.track.set_alpha(1)
+        self.poly.set_alpha(1)
+        self._handle.set_alpha(1)
+        self.valtext.set_alpha(1)
+        self.label.set_alpha(1)
+    
+    def set_style_off(self):
+        self.track.set_facecolor(self.track_fc_off)
+        self.poly.set_facecolor(self.poly_fc_off)
+        self._handle.set_markeredgecolor(self.handle_mec_off)
+        self._handle.set_markerfacecolor(self.handle_mfc_off)
+        self.track.set_alpha(self.track_alpha_off)
+        self.poly.set_alpha(self.poly_alpha_off)
+        self._handle.set_alpha(self.handle_alpha_off)
+        self.valtext.set_alpha(self.valtext_alpha_off)
+        self.label.set_alpha(self.label_alpha_off)
+    
+    def key_step(self, x):
+        if x==1:
+            self.set_val(self.val + self.nsteps)
+        elif x==0:
+            self.set_val(self.val - self.nsteps)
+    
+    def enable(self, x):
+        if x: self.set_style()
+        else: self.set_style_off()
+        
 
 class CSlider(matplotlib.widgets.Slider):
     """ Slider with enable/disable function """
@@ -267,7 +320,6 @@ class ReverseSpinBox(QtWidgets.QSpinBox):
     def stepBy(self, steps):
         return super().stepBy(-steps)
 
-
 class LabeledWidget(QtWidgets.QWidget):
     def __init__(self, widget=QtWidgets.QWidget, txt='', orientation='v', 
                  label_pos=0, **kwargs):
@@ -344,7 +396,9 @@ class LabeledPushbutton(LabeledWidget):
 
 
 class SpinboxRange(QtWidgets.QWidget):
-    def __init__(self, double=False, parent=None, **kwargs):
+    range_changed_signal = QtCore.pyqtSignal()
+    
+    def __init__(self, double=False, alignment=QtCore.Qt.AlignLeft, parent=None, **kwargs):
         super().__init__(parent)
         if double:
             self.box0 = QtWidgets.QDoubleSpinBox()
@@ -353,10 +407,13 @@ class SpinboxRange(QtWidgets.QWidget):
             self.box0 = QtWidgets.QSpinBox()
             self.box1 = QtWidgets.QSpinBox()
         for box in [self.box0, self.box1]:
+            box.setAlignment(alignment)
             if 'suffix' in kwargs: box.setSuffix(kwargs['suffix'])
             if 'minimum' in kwargs: box.setMinimum(kwargs['minimum'])
             if 'maximum' in kwargs: box.setMaximum(kwargs['maximum'])
             if 'decimals' in kwargs: box.setDecimals(kwargs['decimals'])
+            if 'step' in kwargs: box.setSingleStep(kwargs['step'])
+            box.valueChanged.connect(lambda: self.range_changed_signal.emit())
             
         self.dash = QtWidgets.QLabel(' — ')
         self.dash.setAlignment(QtCore.Qt.AlignCenter)
@@ -364,9 +421,9 @@ class SpinboxRange(QtWidgets.QWidget):
         self.layout = QtWidgets.QHBoxLayout(self)
         self.layout.setContentsMargins(0,0,0,0)
         self.layout.setSpacing(0)
-        self.layout.addWidget(self.box0)
-        self.layout.addWidget(self.dash)
-        self.layout.addWidget(self.box1)
+        self.layout.addWidget(self.box0, stretch=2)
+        self.layout.addWidget(self.dash, stretch=0)
+        self.layout.addWidget(self.box1, stretch=2)
     
     def get_values(self):
         return [self.box0.value(), self.box1.value()]
@@ -479,12 +536,8 @@ class AnalysisBtns(QtWidgets.QWidget):
         self.option2_widget = self.create_widget('Classify dentate spikes', 'blue')
         self.option2_btn = self.option2_widget.findChild(QtWidgets.QPushButton)
         
-        #self.btn_grp.addButton(self.option1_btn)
-        #self.btn_grp.addButton(self.option2_btn)
         self.option1_widget.setEnabled(False)
         self.option2_widget.setEnabled(False)
-        
-        #self.btn_grp.buttonToggled.connect(self.action_toggled)
     
     def create_widget(self, txt, c):
         widget = QtWidgets.QWidget()
@@ -518,6 +571,77 @@ class AnalysisBtns(QtWidgets.QWidget):
         # required: event channels file, DS_DF file for current probe
         if f'DS_DF_{probe_idx}' in files and f'theta_ripple_hil_chan_{probe_idx}.npy' in files:
             self.option2_widget.setEnabled(True)
+            
+
+class ComboBox(QtWidgets.QComboBox):
+    
+    def paintEvent(self, event):
+        painter = QtWidgets.QStylePainter(self)
+        painter.setPen(self.palette().color(QtGui.QPalette.Text))
+
+        # draw the combobox frame, focusrect and selected etc.
+        opt = QtWidgets.QStyleOptionComboBox()
+        self.initStyleOption(opt)
+        painter.drawComplexControl(QtWidgets.QStyle.CC_ComboBox, opt)
+
+        if self.currentIndex() < 0:
+            opt.palette.setBrush(
+                QtGui.QPalette.ButtonText,
+                opt.palette.brush(QtGui.QPalette.ButtonText).color().lighter(),
+            )
+            painter.setOpacity(0.5)
+            if self.placeholderText():
+                opt.currentText = self.placeholderText()
+
+        # draw the icon and text
+        painter.drawControl(QtWidgets.QStyle.CE_ComboBoxLabel, opt)
+
+
+class AddChannelWidget(QtWidgets.QWidget):
+    def __init__(self, orientation='h', add_btn_pos='right',parent=None):
+        super().__init__(parent)
+        
+        ### create widgets
+        self.label = QtWidgets.QLabel('<u>Add channel</u>')
+        self.ch_dropdown = ComboBox()  # channel dropdown menu
+        self.add_btn = QtWidgets.QPushButton()  # annotate channel as "noise"
+        self.add_btn.setFixedSize(25,25)
+        self.add_btn.setStyleSheet('QPushButton {padding : 2px 0px 0px 2px;}')
+        # set arrow icon direction
+        fmt = 'QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_Arrow%s)'
+        icon = eval(fmt % {'left':'Back','right':'Forward'}[add_btn_pos])
+        
+        #ffindme
+        
+        self.add_btn.setIcon(icon)
+        self.add_btn.setIconSize(QtCore.QSize(18,18))
+        self.clear_btn = QtWidgets.QPushButton('Clear channels')
+        
+        self.vlayout = QtWidgets.QVBoxLayout(self)
+        self.vlayout.setContentsMargins(0,0,0,0)
+        if orientation == 'h':
+            self.horiz_layout(add_btn_pos=add_btn_pos)
+        elif orientation == 'v':
+            self.vert_layout()
+        else:
+            pass
+        
+    def horiz_layout(self, add_btn_pos):
+        """ Layout used for DS/ripple event analysis popup """
+        # dropdown next to add button
+        hlay = QtWidgets.QHBoxLayout()
+        hlay.setContentsMargins(0,0,0,0)
+        hlay.setSpacing(1)
+        hlay.addWidget(self.ch_dropdown)
+        hlay.addWidget(self.add_btn) if add_btn_pos=='right' else hlay.insertWidget(0, self.add_btn)
+        self.vlayout.addWidget(self.label)
+        self.vlayout.addLayout(hlay)
+        self.vlayout.addWidget(self.clear_btn)
+        
+    def vert_layout(self):
+        """ Layout used for noise channel annotations """
+        pass
+    
 
 
 class TableWidget(QtWidgets.QTableWidget):
@@ -593,10 +717,47 @@ class TTabWidget(QtWidgets.QTabWidget):
             )
         return size
 
+class MsgWindow(QtWidgets.QDialog):
+    def __init__(self, msg='A message!', sub_msg='A smaller message!', title='A title!', parent=None):
+        super().__init__(parent=parent)
+        self.setWindowTitle(title)
+        self.icon_btn = QtWidgets.QPushButton()
+        self.icon_btn.setFixedSize(50, 50)
+        self.icon_btn.setFlat(True)
+        self.icon_btn.setIcon(QtGui.QIcon(':/icons/info_blue.png'))
+        self.icon_btn.setIconSize(QtCore.QSize(45, 45))
+        self.text_label = QtWidgets.QLabel(msg)
+        self.text_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.text_label.setStyleSheet('QLabel {'
+                                      'font-size : 15pt;'
+                                      '}')
+        self.subtext_label = QtWidgets.QLabel()
+        self.subtext_label.setStyleSheet('QLabel {'
+                                        'font-size : 12pt;'
+                                        '}')
+        self.main_grid = QtWidgets.QGridLayout()
+        self.main_grid.addWidget(self.icon_btn, 0, 0, 2, 1)
+        self.main_grid.addWidget(self.text_label, 0, 1)
+        self.main_grid.addWidget(self.subtext_label, 1, 1)
+        self.bbox = QtWidgets.QHBoxLayout()
+        self.accept_btn = QtWidgets.QPushButton('Ok')
+        self.reject_btn = QtWidgets.QPushButton('Close')
+        self.bbox.addWidget(self.accept_btn)
+        self.bbox.addWidget(self.reject_btn)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.addLayout(self.main_grid)
+        self.layout.addLayout(self.bbox)
+        
+        self.accept_btn.clicked.connect(self.accept)
+        self.reject_btn.clicked.connect(self.reject)
+        
+        self.show()
+        self.raise_()
+        
 
 class Msgbox(QtWidgets.QMessageBox):
-    def __init__(self, msg='', sub_msg='', title='', parent=None):
-        super().__init__(parent)
+    def __init__(self, msg='', sub_msg='', title='', no_buttons=False, parent=None):
+        super().__init__(parent=parent)
         self.setWindowTitle(title)
         # get icon label
         self.icon_label = self.findChild(QtWidgets.QLabel, 'qt_msgboxex_icon_label')
@@ -610,13 +771,12 @@ class Msgbox(QtWidgets.QMessageBox):
         self.sub_label = self.findChild(QtWidgets.QLabel, 'qt_msgbox_informativelabel')
         # locate button box
         self.bbox = self.findChild(QtWidgets.QDialogButtonBox, 'qt_msgbox_buttonbox')
-        
+    
     @classmethod
     def run(cls, *args, **kwargs):
         pyfx.qapp()
         msgbox = cls(*args, **kwargs)
         msgbox.show()
-        msgbox.raise_()
         res = msgbox.exec()
         return res
     
@@ -631,22 +791,45 @@ class MsgboxSave(Msgbox):
         chk_icon = self.style().standardIcon(QtWidgets.QStyle.SP_DialogApplyButton)
         px_size = self.icon_label.pixmap().size()
         self.setIconPixmap(chk_icon.pixmap(px_size))
-
+        
+        
 
 class MsgboxError(Msgbox):
-    def __init__(self, msg='Something went wrong!', sub_msg='', title='', 
-                 invalid_probe='', parent=None):
+    def __init__(self, msg='Something went wrong!', sub_msg='', title='', parent=None):
         super().__init__(msg, sub_msg, title, parent)
         # pop-up messagebox appears when save is complete
         self.setIcon(QtWidgets.QMessageBox.Critical)
         self.setStandardButtons(QtWidgets.QMessageBox.Close)
-        if invalid_probe:
-            self.invalid_probe_file(invalid_probe)
-            
-    def invalid_probe_file(self, f):
-        self.setText('The following is not a valid probe file:')
-        self.setInformativeText(f'<nobr><code>{f}</code></nobr>')
-        self.sub_label.setWordWrap(False)
+        
+
+class MsgboxInvalid(MsgboxError):
+    def __init__(self, msg='Invalid file!', sub_msg='', title='', parent=None):
+        super().__init__(msg, sub_msg, title, parent)
+    
+    @classmethod
+    def invalid_file(cls, filepath='', filetype='probe', parent=None):
+        fopts =  ['probe', 'param', 'array']
+        assert filetype in fopts
+        ftxt = ['PROBE','PARAMETER','DATA'][fopts.index(filetype)]
+        sub_msg = ''
+        #findme
+        if not os.path.isfile(filepath):
+            msg = f'<h3><u>{ftxt} FILE DOES NOT EXIST</u>:</h3><br><nobr><code>{filepath}</code></nobr>'
+        else:
+            msg = f'<h3><u>INVALID {ftxt} FILE</u>:</h3><br><nobr><code>{filepath}</code></nobr>'
+            if filetype == 'param':
+                params, invalid_keys = ephys.read_param_file(filepath)
+                sub_msg = f'<hr><code><u>MISSING PARAMS</u>: {", ".join(invalid_keys)}</code>'
+        # launch messagebox
+        msgbox = cls(msg=msg, sub_msg=sub_msg, parent=parent)
+        msgbox.show()
+        msgbox.raise_()
+        res = msgbox.exec()
+        if res == QtWidgets.QMessageBox.Open:
+            return True   # keep file dialog open for another selection
+        elif res == QtWidgets.QMessageBox.Close:
+            return False  # close file dialog
+    
 
 
 class MsgboxWarning(Msgbox):
@@ -654,31 +837,43 @@ class MsgboxWarning(Msgbox):
         super().__init__(msg, sub_msg, title, parent)
         self.setIcon(QtWidgets.QMessageBox.Warning)
         self.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+    
+    
+    @classmethod
+    def overwrite_warning(cls, ppath, parent=None):
+        # check whether selected folder contains any contents/selected file already exists
+        ddir_ovr = bool(os.path.isdir(ppath) and len(os.listdir(ppath)) > 0)
+        f_ovr = bool(os.path.isfile(ppath))
+        if not any([ddir_ovr, f_ovr]):
+            return True
         
-    def set_overwrite_mode(self, ppath):
-        # overwrite items in directory
-        if os.path.isdir(ppath) and len(os.listdir(ppath)) > 0:
+        msgbox = cls(parent=parent)
+        if ddir_ovr:
             n = len(os.listdir(ppath))
-            self.setText(f'The directory <code>{os.path.basename(ppath)}</code> contains '
+            msgbox.setText(f'The directory <code>{os.path.basename(ppath)}</code> contains '
                          f'<code>{n}</code> items.')#'<br><br>Overwrite existing files?')
-            self.setInformativeText('Overwrite existing files?')
-            self.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel
-                                    | QtWidgets.QMessageBox.Apply)
-            merge_btn = self.button(QtWidgets.QMessageBox.Apply)
+            msgbox.setInformativeText('Overwrite existing files?')
+            msgbox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel
+                                      | QtWidgets.QMessageBox.Apply)
+            merge_btn = msgbox.button(QtWidgets.QMessageBox.Apply)
             merge_btn.setText(merge_btn.text().replace('Apply','Merge'))
-        # overwrite file
-        elif os.path.isfile(ppath):
-            self.setText(f'The file <code>{os.path.basename(ppath)}</code> already exists.')
-            self.setInformativeText('Do you want to replace it?')
-            self.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel)
-        else:
-            return False
-        # rename "Yes" button to "Overwrite" response buttons
-        yes_btn = self.button(QtWidgets.QMessageBox.Yes)
+        elif f_ovr:
+            msgbox.setText(f'The file <code>{os.path.basename(ppath)}</code> already exists.')
+            msgbox.setInformativeText('Do you want to replace it?')
+            msgbox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel)    
+        yes_btn = msgbox.button(QtWidgets.QMessageBox.Yes)
         yes_btn.setText(yes_btn.text().replace('Yes','Overwrite'))
-        return True
-    
-    
+        res = msgbox.exec()
+        
+        if res == QtWidgets.QMessageBox.Yes: 
+            if os.path.isdir(ppath):
+                shutil.rmtree(ppath) # delete any existing directory files
+                os.makedirs(ppath)
+            return True    # continue overwriting
+        elif res == QtWidgets.QMessageBox.Apply:
+            return True    # add new files to the existing directory contents
+        else: return False # abort save attempt
+        
     @classmethod
     def unsaved_changes_warning(cls, msg='Unsaved changes', sub_msg='Do you want to save your work?', parent=None):
         msgbox = cls(msg, sub_msg, parent=parent)
@@ -694,31 +889,10 @@ class MsgboxWarning(Msgbox):
             return -1     # save changes and then close
         
         
-    @classmethod
-    def overwrite_warning(cls, ppath, parent=None):
-        msgbox = cls(parent=parent)
-        is_ovr = msgbox.set_overwrite_mode(ppath)
-        if is_ovr==False: 
-            return True  # fake news, no overwrite
-        msgbox.show()
-        msgbox.raise_()
-        res = msgbox.exec()
-        if res == QtWidgets.QMessageBox.Yes: 
-            if os.path.isdir(ppath):
-                shutil.rmtree(ppath)  # delete any existing directory files
-                os.makedirs(ppath)
-            return True  # continue overwriting
-        elif res == QtWidgets.QMessageBox.Apply:
-            return True   # add new files to the existing directory contents
-        else: return False  # abort save attempt
-        
-        
 class AuxDialog(QtWidgets.QDialog):
     def __init__(self, n, parent=None):
         super().__init__(parent)
         
-        #flags = self.windowFlags() | QtCore.Qt.FramelessWindowHint
-        #self.setWindowFlags(flags)
         self.setWindowTitle('AUX channels')
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setSpacing(10)
@@ -776,23 +950,668 @@ class AuxDialog(QtWidgets.QDialog):
         np.save('.aux_files.npy', self.auxf)
         super().accept()
         
+
+class ParamObject(QtWidgets.QWidget):
+    update_signal = QtCore.pyqtSignal(dict)
+    
+    def __init__(self, params={}, data_processing=True, ds_classification=True, 
+                 el_geom=True, parent=None):
+        super().__init__(parent)
+        self.data_processing = data_processing
+        self.ds_classification = ds_classification
+        self.el_geom = el_geom
+        
+        self.gen_layout()
+        self.update_gui_from_ddict(params)
+        self.connect_signals()
+        
+        QtCore.QTimer.singleShot(50, self.adjust_labels)
+        self.setStyleSheet('QWidget {'
+                           'font-size : 15pt;'
+                           '}'
+                           'QToolTip {'
+                           'background-color : lightyellow;'
+                           'border : 2px solid black;'
+                           'font-size : 15pt;'
+                           'padding : 4px;'
+                           '}')
+        
+    def gen_layout(self):
+        
+        ###   DATA PROCESSING   ###
+        
+        # labels
+        self.lfp_fs_lbl = QtWidgets.QLabel('Downsampled FS')
+        self.theta_lbl = QtWidgets.QLabel('Theta range')
+        self.slow_gamma_lbl = QtWidgets.QLabel('Slow gamma range')
+        self.fast_gamma_lbl = QtWidgets.QLabel('Fast gamma range')
+        self.ds_freq_lbl = QtWidgets.QLabel('DS bandpass filter')
+        self.ds_height_thr_lbl = QtWidgets.QLabel('DS height')
+        self.ds_dist_thr_lbl = QtWidgets.QLabel('DS separation')
+        self.ds_prom_thr_lbl = QtWidgets.QLabel('DS prominence')
+        self.ds_wlen_lbl = QtWidgets.QLabel('DS window length')
+        self.swr_freq_lbl = QtWidgets.QLabel('Ripple bandpass filter')
+        self.swr_ch_bound_lbl = QtWidgets.QLabel('Ripple window')
+        self.swr_height_thr_lbl = QtWidgets.QLabel('Ripple height')
+        self.swr_min_thr_lbl = QtWidgets.QLabel('Ripple min. height')
+        self.swr_dist_thr_lbl = QtWidgets.QLabel('Ripple separation')
+        self.swr_min_dur_lbl = QtWidgets.QLabel('Ripple min. duration')
+        self.swr_freq_thr_lbl = QtWidgets.QLabel('Ripple frequency')
+        self.swr_freq_win_lbl = QtWidgets.QLabel('Ripple freq window')
+        self.swr_maxamp_win_lbl = QtWidgets.QLabel('Ripple peak window')
+        # descriptions
+        self.lfp_fs_info = 'Target sampling rate (Hz) for downsampled LFP data.'
+        self.theta_info = 'Bandpass filter cutoff frequencies (Hz) in the theta frequency range.'
+        self.slow_gamma_info = 'Bandpass filter cutoff frequencies (Hz) in the slow gamma frequency range.'
+        self.fast_gamma_info = 'Bandpass filter cutoff frequencies (Hz) in the fast gamma frequency range.'
+        self.ds_freq_info = 'Bandpass filter cutoff frequencies (Hz) for detecting dentate spikes.'
+        self.ds_height_thr_info = 'Minimum peak height (standard deviations) of a dentate spike.'
+        self.ds_dist_thr_info = 'Minimum distance (ms) between neighboring dentate spikes.'
+        self.ds_prom_thr_info = 'Minimum dentate spike prominence (relative to the surrounding signal).'
+        self.ds_wlen_info = 'Window size (ms) for evaluating dentate spikes.'
+        self.swr_freq_info = 'Bandpass filter cutoff frequencies (Hz) for detecting sharp-wave ripples.'
+        self.swr_ch_bound_info =' Number of channels on either side of the ripple LFP to include in ripple profile.'
+        self.swr_height_thr_info = 'Minimum height (standard deviations) at the peak of a ripple envelope.'
+        self.swr_min_thr_info = 'Minimum height (standard deviations) at the edges of a ripple envelope.'
+        self.swr_dist_thr_info = 'Minimum distance (ms) between neighboring ripples.'
+        self.swr_min_dur_info = 'Minimum duration (ms) of a ripple.'
+        self.swr_freq_thr_info = 'Minimum instantaneous frequency (Hz) of a ripple.'
+        self.swr_freq_win_info = 'Window size (ms) for calculating ripple instantaneous frequency.'
+        self.swr_maxamp_win_info = 'Window size (ms) to look for maximum ripple LFP amplitude.'
+        # widgets
+        self.lfp_fs = QtWidgets.QDoubleSpinBox()
+        self.lfp_fs.setDecimals(1)
+        self.lfp_fs.setSingleStep(0.5)
+        self.lfp_fs.setSuffix(' Hz')
+        kwargs = dict(double=True, decimals=1, step=0.5, maximum=999999, suffix=' Hz')
+        self.theta = SpinboxRange(**kwargs)
+        self.slow_gamma = SpinboxRange(**kwargs)
+        self.fast_gamma = SpinboxRange(**kwargs)
+        self.ds_freq = SpinboxRange(**kwargs)
+        self.swr_freq = SpinboxRange(**kwargs)
+        self.ds_height_thr = QtWidgets.QDoubleSpinBox()
+        self.ds_height_thr.setSuffix(' S.D.')
+        self.ds_dist_thr = QtWidgets.QSpinBox()
+        self.ds_dist_thr.setSuffix(' ms')
+        self.ds_prom_thr = QtWidgets.QDoubleSpinBox()
+        self.ds_prom_thr.setSuffix(' a.u.')
+        self.ds_wlen = QtWidgets.QSpinBox()
+        self.ds_wlen.setSuffix(' ms')
+        self.swr_ch_bound = QtWidgets.QSpinBox()
+        self.swr_ch_bound.setSuffix(' channels')
+        self.swr_height_thr = QtWidgets.QDoubleSpinBox()
+        self.swr_height_thr.setSuffix(' S.D.')
+        self.swr_min_thr = QtWidgets.QDoubleSpinBox()
+        self.swr_min_thr.setSuffix(' S.D.')
+        self.swr_dist_thr = QtWidgets.QSpinBox()
+        self.swr_dist_thr.setSuffix(' ms')
+        self.swr_min_dur = QtWidgets.QSpinBox()
+        self.swr_min_dur.setSuffix(' ms')
+        self.swr_freq_thr = QtWidgets.QDoubleSpinBox()
+        self.swr_freq_thr.setDecimals(1)
+        self.swr_freq_thr.setSuffix(' Hz')
+        self.swr_freq_win = QtWidgets.QSpinBox()
+        self.swr_freq_win.setSuffix(' ms')
+        self.swr_maxamp_win = QtWidgets.QSpinBox()
+        self.swr_maxamp_win.setSuffix(' ms')
+        # row widgets
+        self.lfp_fs_row = self.create_row(self.lfp_fs_lbl, self.lfp_fs, self.lfp_fs_info)
+        self.theta_row = self.create_row(self.theta_lbl, self.theta, self.theta_info)
+        self.slow_gamma_row = self.create_row(self.slow_gamma_lbl, self.slow_gamma, self.slow_gamma_info)
+        self.fast_gamma_row = self.create_row(self.fast_gamma_lbl, self.fast_gamma, self.fast_gamma_info)
+        self.ds_freq_row = self.create_row(self.ds_freq_lbl, self.ds_freq, self.ds_freq_info)
+        self.ds_height_thr_row = self.create_row(self.ds_height_thr_lbl, self.ds_height_thr, self.ds_height_thr_info)
+        self.ds_dist_thr_row = self.create_row(self.ds_dist_thr_lbl, self.ds_dist_thr, self.ds_dist_thr_info)
+        self.ds_prom_thr_row = self.create_row(self.ds_prom_thr_lbl, self.ds_prom_thr, self.ds_prom_thr_info)
+        self.ds_wlen_row = self.create_row(self.ds_wlen_lbl, self.ds_wlen, self.ds_wlen_info)
+        self.swr_freq_row = self.create_row(self.swr_freq_lbl, self.swr_freq, self.swr_freq_info)
+        self.swr_ch_bound_row = self.create_row(self.swr_ch_bound_lbl, self.swr_ch_bound, self.swr_ch_bound_info)
+        self.swr_height_thr_row = self.create_row(self.swr_height_thr_lbl, self.swr_height_thr, self.swr_height_thr_info)
+        self.swr_min_thr_row = self.create_row(self.swr_min_thr_lbl, self.swr_min_thr, self.swr_min_thr_info)
+        self.swr_dist_thr_row = self.create_row(self.swr_dist_thr_lbl, self.swr_dist_thr, self.swr_dist_thr_info)
+        self.swr_min_dur_row = self.create_row(self.swr_min_dur_lbl, self.swr_min_dur, self.swr_min_dur_info)
+        self.swr_freq_thr_row = self.create_row(self.swr_freq_thr_lbl, self.swr_freq_thr, self.swr_freq_thr_info)
+        self.swr_freq_win_row = self.create_row(self.swr_freq_win_lbl, self.swr_freq_win, self.swr_freq_win_info)
+        self.swr_maxamp_win_row = self.create_row(self.swr_maxamp_win_lbl, self.swr_maxamp_win, self.swr_maxamp_win_info)
+        
+        ###   DS CLASSIFICATION   ###
+        
+        # labels
+        self.csd_method_lbl = QtWidgets.QLabel('CSD mode')
+        self.f_type_lbl = QtWidgets.QLabel('CSD filter')
+        self.f_order_lbl = QtWidgets.QLabel('Filter order')
+        self.f_sigma_lbl = QtWidgets.QLabel('Filter sigma (\u03C3)')
+        self.vaknin_el_lbl = QtWidgets.QLabel('Vaknin electrode')
+        self.tol_lbl = QtWidgets.QLabel('Tolerance')
+        self.spline_nsteps_lbl = QtWidgets.QLabel('Spline steps')
+        self.src_diam_lbl = QtWidgets.QLabel('Source diameter')
+        self.src_h_lbl = QtWidgets.QLabel('Source thickness')
+        self.cond_lbl = QtWidgets.QLabel('Conductivity')
+        self.cond_top_lbl = QtWidgets.QLabel('Conductivity (top)')
+        self.clus_algo_lbl = QtWidgets.QLabel('Clustering method')
+        self.nclusters_lbl = QtWidgets.QLabel('# clusters')
+        self.eps_lbl = QtWidgets.QLabel('Epsilon (\u03B5)')
+        self.min_clus_samples_lbl = QtWidgets.QLabel('Min. cluster samples')
+        # descriptions
+        self.csd_method_info = 'Current source density (CSD) estimation method.'
+        self.f_type_info = 'Spatial filter for estimated CSD.'
+        self.f_order_info = 'CSD spatial filter settings (passed to scipy.signal method).'
+        self.f_sigma_info = 'Sigma (or standard deviation) parameter; applies to Gaussian filter only.'
+        self.vaknin_el_info = "Calculate CSD with or without Vaknin's method of duplicating endpoint electrodes."
+        self.tol_info = 'Tolerance of numerical integration in CSD estimation; applies to step and spline methods only.'
+        self.spline_nsteps_info = 'Number of upsampled data points in CSD estimation; applies to spline method only.'
+        self.src_diam_info = 'Diameter (mm) of the assumed circular current sources.'
+        self.src_h_info = 'Thickness (mm) of the assumed cylindrical current sources.'
+        self.cond_info = 'Conductivity (Siemens per meter) through brain tissue.'
+        self.cond_top_info = 'Conductivity (Siemens per meter) on top of brain tissue.'
+        self.clus_algo_info = 'Clustering algorithm used to classify dentate spikes.'
+        self.nclusters_info = 'Number of target clusters; applies to K-means algorithm only.'
+        self.eps_info = 'Maximum distance between points in the same cluster; applies to DBSCAN algorithm only.'
+        self.min_clus_samples_info = 'Minimum number of samples per cluster; applies to DBSCAN algorithm only.'
+        # widgets
+        self.csd_method = QtWidgets.QComboBox()
+        self.csd_method.addItems(['Standard','Delta','Step','Spline'])
+        self.f_type = QtWidgets.QComboBox()
+        self.f_type.addItems(['Gaussian','Identity','Boxcar','Hamming','Triangular'])
+        self.f_order = QtWidgets.QSpinBox()
+        self.f_order.setMinimum(1)
+        self.f_sigma = QtWidgets.QDoubleSpinBox()
+        self.f_sigma.setDecimals(1)
+        self.f_sigma.setSingleStep(0.1)
+        self.vaknin_el = QtWidgets.QComboBox()
+        self.vaknin_el.addItems(['True','False'])
+        self.tol = QtWidgets.QDoubleSpinBox()
+        self.tol.setDecimals(7)
+        self.tol.setSingleStep(0.0000001)
+        self.spline_nsteps = QtWidgets.QSpinBox()
+        self.spline_nsteps.setMaximum(2500)
+        self.src_diam = QtWidgets.QDoubleSpinBox()
+        self.src_diam.setDecimals(3)
+        self.src_diam.setSingleStep(0.01)
+        self.src_diam.setSuffix(' mm')
+        self.src_h = QtWidgets.QDoubleSpinBox()
+        self.src_h.setDecimals(3)
+        self.src_h.setSingleStep(0.01)
+        self.src_h.setSuffix(' mm')
+        self.cond = QtWidgets.QDoubleSpinBox()
+        self.cond.setDecimals(3)
+        self.cond.setSingleStep(0.01)
+        self.cond.setSuffix(' S/m')
+        self.cond_top = QtWidgets.QDoubleSpinBox()
+        self.cond_top.setDecimals(3)
+        self.cond_top.setSingleStep(0.01)
+        self.cond_top.setSuffix(' S/m')
+        self.clus_algo = QtWidgets.QComboBox()
+        self.clus_algo.addItems(['K-means','DBSCAN'])
+        self.nclusters = QtWidgets.QSpinBox()
+        self.nclusters.setMinimum(1)
+        self.nclusters.setSuffix(' clusters')
+        self.eps = QtWidgets.QDoubleSpinBox()
+        self.eps.setDecimals(2)
+        self.eps.setSingleStep(0.1)
+        self.eps.setSuffix(' a.u.')
+        self.min_clus_samples = QtWidgets.QSpinBox()
+        self.min_clus_samples.setMinimum(1)
+        # row widgets
+        self.csd_method_row = self.create_row(self.csd_method_lbl, self.csd_method, self.csd_method_info)
+        self.f_type_row = self.create_row(self.f_type_lbl, self.f_type, self.f_type_info)
+        self.f_order_row = self.create_row(self.f_order_lbl, self.f_order, self.f_order_info)
+        self.f_sigma_row = self.create_row(self.f_sigma_lbl, self.f_sigma, self.f_sigma_info)
+        self.vaknin_el_row = self.create_row(self.vaknin_el_lbl, self.vaknin_el, self.vaknin_el_info)
+        self.tol_row = self.create_row(self.tol_lbl, self.tol, self.tol_info)
+        self.spline_nsteps_row = self.create_row(self.spline_nsteps_lbl, self.spline_nsteps, self.spline_nsteps_info)
+        self.src_diam_row = self.create_row(self.src_diam_lbl, self.src_diam, self.src_diam_info)
+        self.src_h_row = self.create_row(self.src_h_lbl, self.src_h, self.src_h_info)
+        self.cond_row = self.create_row(self.cond_lbl, self.cond, self.cond_info)
+        self.cond_top_row = self.create_row(self.cond_top_lbl, self.cond_top, self.cond_top_info)
+        self.clus_algo_row = self.create_row(self.clus_algo_lbl, self.clus_algo, self.clus_algo_info)
+        self.nclusters_row = self.create_row(self.nclusters_lbl, self.nclusters, self.nclusters_info)
+        self.eps_row = self.create_row(self.eps_lbl, self.eps, self.eps_info)
+        self.min_clus_samples_row = self.create_row(self.min_clus_samples_lbl, self.min_clus_samples, self.min_clus_samples_info)
+        
+        ###   PROBE GEOMETRY   ###
+        
+        # labels
+        self.el_w_lbl = QtWidgets.QLabel('Contact width')
+        self.el_h_lbl = QtWidgets.QLabel('Contact height')
+        self.el_shape_lbl = QtWidgets.QLabel('Contact shape')
+        # descriptions
+        self.el_w_info = 'Default width (\u00B5m) of probe electrode contacts.'
+        self.el_h_info = 'Default height (\u00B5m) of probe electrode contacts.'
+        self.el_shape_info = 'Default shape of probe electrode contacts.'
+        # widgets
+        self.el_w = QtWidgets.QDoubleSpinBox()
+        self.el_w.setDecimals(1)
+        self.el_w.setSuffix(' \u00B5m')
+        self.el_h = QtWidgets.QDoubleSpinBox()
+        self.el_h.setDecimals(1)
+        self.el_h.setSuffix(' \u00B5m')
+        self.el_shape = QtWidgets.QComboBox()
+        self.el_shape.addItems(['Circle', 'Square', 'Rectangle'])
+        # row widgets
+        self.el_w_row = self.create_row(self.el_w_lbl, self.el_w, self.el_w_info)
+        self.el_h_row = self.create_row(self.el_h_lbl, self.el_h, self.el_h_info)
+        self.el_shape_row = self.create_row(self.el_shape_lbl, self.el_shape, self.el_shape_info)
+        
+        for sbox in [self.lfp_fs, self.ds_height_thr, self.ds_dist_thr, self.ds_prom_thr, self.ds_wlen, 
+                     self.swr_ch_bound, self.swr_height_thr, self.swr_min_thr, self.swr_dist_thr, 
+                     self.swr_min_dur, self.swr_freq_thr, self.swr_freq_win, self.swr_maxamp_win,
+                     self.f_order, self.f_sigma, self.tol, self.src_diam, self.src_h, self.cond,
+                     self.cond_top, self.nclusters, self.eps, self.min_clus_samples, self.el_w, self.el_h]:
+            sbox.setMaximum(999999)
             
+        self.LABELS = [self.lfp_fs_lbl,
+                       self.theta_lbl,
+                       self.slow_gamma_lbl,
+                       self.fast_gamma_lbl,
+                       self.ds_freq_lbl,
+                       self.ds_height_thr_lbl,
+                       self.ds_dist_thr_lbl,
+                       self.ds_prom_thr_lbl,
+                       self.ds_wlen_lbl,
+                       self.swr_freq_lbl,
+                       self.swr_ch_bound_lbl,
+                       self.swr_height_thr_lbl,
+                       self.swr_min_thr_lbl,
+                       self.swr_dist_thr_lbl,
+                       self.swr_min_dur_lbl,
+                       self.swr_freq_thr_lbl,
+                       self.swr_freq_win_lbl,
+                       self.swr_maxamp_win_lbl,
+                       self.csd_method_lbl,
+                       self.f_type_lbl,
+                       self.f_order_lbl,
+                       self.f_sigma_lbl,
+                       self.vaknin_el_lbl,
+                       self.tol_lbl,
+                       self.spline_nsteps_lbl,
+                       self.src_diam_lbl,
+                       self.src_h_lbl,
+                       self.cond_lbl,
+                       self.cond_top_lbl,
+                       self.clus_algo_lbl,
+                       self.nclusters_lbl,
+                       self.eps_lbl,
+                       self.min_clus_samples_lbl,
+                       self.el_w_lbl,
+                       self.el_h_lbl,
+                       self.el_shape_lbl]
+        self.WIDGETS = [self.lfp_fs,
+                        self.theta,
+                        self.slow_gamma,
+                        self.fast_gamma,
+                        self.ds_freq,
+                        self.ds_height_thr,
+                        self.ds_dist_thr,
+                        self.ds_prom_thr,
+                        self.ds_wlen,
+                        self.swr_freq,
+                        self.swr_ch_bound,
+                        self.swr_height_thr,
+                        self.swr_min_thr,
+                        self.swr_dist_thr,
+                        self.swr_min_dur,
+                        self.swr_freq_thr,
+                        self.swr_freq_win,
+                        self.swr_maxamp_win,
+                        self.csd_method,
+                        self.f_type,
+                        self.f_order,
+                        self.f_sigma,
+                        self.vaknin_el,
+                        self.tol,
+                        self.spline_nsteps,
+                        self.src_diam,
+                        self.src_h,
+                        self.cond,
+                        self.cond_top,
+                        self.clus_algo,
+                        self.nclusters,
+                        self.eps,
+                        self.min_clus_samples,
+                        self.el_w,
+                        self.el_h,
+                        self.el_shape]
+        # disable scroll wheel input for spinbox/dropdown widgets
+        for w in self.WIDGETS:
+            if w.__class__ == SpinboxRange:
+                w.box0.wheelEvent = lambda event: None
+                w.box1.wheelEvent = lambda event: None
+            else:
+                w.wheelEvent = lambda event: None
+            
+        ###   LAYOUT   ###
+        
+        self.layout = QtWidgets.QVBoxLayout(self)
+        if self.data_processing == True:
+            self.layout.addWidget(self.lfp_fs_row)
+            self.layout.addWidget(self.theta_row)
+            self.layout.addWidget(self.slow_gamma_row)
+            self.layout.addWidget(self.fast_gamma_row)
+            self.layout.addWidget(self.ds_freq_row)
+            self.layout.addWidget(self.ds_height_thr_row)
+            self.layout.addWidget(self.ds_dist_thr_row)
+            self.layout.addWidget(self.ds_prom_thr_row)
+            self.layout.addWidget(self.ds_wlen_row)
+            self.layout.addWidget(self.swr_freq_row)
+            self.layout.addWidget(self.swr_ch_bound_row)
+            self.layout.addWidget(self.swr_height_thr_row)
+            self.layout.addWidget(self.swr_min_thr_row)
+            self.layout.addWidget(self.swr_dist_thr_row)
+            self.layout.addWidget(self.swr_min_dur_row)
+            self.layout.addWidget(self.swr_freq_thr_row)
+            self.layout.addWidget(self.swr_freq_win_row)
+            self.layout.addWidget(self.swr_maxamp_win_row) # 18 items
+        if self.ds_classification == True:
+            self.layout.addWidget(self.csd_method_row)
+            self.layout.addWidget(self.f_type_row)
+            self.layout.addWidget(self.f_order_row)
+            self.layout.addWidget(self.f_sigma_row)
+            self.layout.addWidget(self.vaknin_el_row)
+            self.layout.addWidget(self.tol_row)
+            self.layout.addWidget(self.spline_nsteps_row)
+            self.layout.addWidget(self.src_diam_row)
+            self.layout.addWidget(self.src_h_row)
+            self.layout.addWidget(self.cond_row)
+            self.layout.addWidget(self.cond_top_row)
+            self.layout.addWidget(self.clus_algo_row)
+            self.layout.addWidget(self.nclusters_row)
+            self.layout.addWidget(self.eps_row)
+            self.layout.addWidget(self.min_clus_samples_row) # 15 items
+        if self.el_geom == True:
+            self.layout.addWidget(self.el_w_row)
+            self.layout.addWidget(self.el_h_row)
+            self.layout.addWidget(self.el_shape_row) # 3 items
+    
+    def connect_signals(self):
+        self.lfp_fs.valueChanged.connect(self.emit_signal)
+        self.theta.range_changed_signal.connect(self.emit_signal)
+        self.slow_gamma.range_changed_signal.connect(self.emit_signal)
+        self.fast_gamma.range_changed_signal.connect(self.emit_signal)
+        self.ds_freq.range_changed_signal.connect(self.emit_signal)
+        self.swr_freq.range_changed_signal.connect(self.emit_signal)
+        self.ds_height_thr.valueChanged.connect(self.emit_signal)
+        self.ds_dist_thr.valueChanged.connect(self.emit_signal)
+        self.ds_prom_thr.valueChanged.connect(self.emit_signal)
+        self.ds_wlen.valueChanged.connect(self.emit_signal)
+        self.swr_ch_bound.valueChanged.connect(self.emit_signal)
+        self.swr_height_thr.valueChanged.connect(self.emit_signal)
+        self.swr_min_thr.valueChanged.connect(self.emit_signal)
+        self.swr_dist_thr.valueChanged.connect(self.emit_signal)
+        self.swr_min_dur.valueChanged.connect(self.emit_signal)
+        self.swr_freq_thr.valueChanged.connect(self.emit_signal)
+        self.swr_freq_win.valueChanged.connect(self.emit_signal)
+        self.swr_maxamp_win.valueChanged.connect(self.emit_signal)
+        self.csd_method.currentIndexChanged.connect(self.emit_signal)
+        self.f_type.currentIndexChanged.connect(self.emit_signal)
+        self.f_order.valueChanged.connect(self.emit_signal)
+        self.f_sigma.valueChanged.connect(self.emit_signal)
+        self.vaknin_el.currentIndexChanged.connect(self.emit_signal)
+        self.tol.valueChanged.connect(self.emit_signal)
+        self.spline_nsteps.valueChanged.connect(self.emit_signal)
+        self.src_diam.valueChanged.connect(self.emit_signal)
+        self.src_h.valueChanged.connect(self.emit_signal)
+        self.cond.valueChanged.connect(self.emit_signal)
+        self.cond_top.valueChanged.connect(self.emit_signal)
+        self.clus_algo.currentIndexChanged.connect(self.emit_signal)
+        self.nclusters.valueChanged.connect(self.emit_signal)
+        self.eps.valueChanged.connect(self.emit_signal)
+        self.min_clus_samples.valueChanged.connect(self.emit_signal)
+        self.el_w.valueChanged.connect(self.emit_signal)
+        self.el_h.valueChanged.connect(self.emit_signal)
+        self.el_shape.currentIndexChanged.connect(self.emit_signal)
+    
+    def create_row(self, label, widget, info=''):
+        """ Return row widget containing parameter label and input item """
+        label.setToolTip(info)
+        w = QtWidgets.QWidget()
+        hbox = QtWidgets.QHBoxLayout(w)
+        hbox.setContentsMargins(0,0,0,0)
+        hbox.addWidget(label, stretch=0)
+        hbox.addWidget(widget, stretch=2)
+        return w
+    
+    def adjust_labels(self):
+        mw = max([lbl.width() for lbl in self.LABELS])
+        for lbl in self.LABELS:
+            lbl.setAlignment(QtCore.Qt.AlignCenter)
+            lbl.setFixedWidth(mw)
+    
+    def emit_signal(self):
+        PARAMS = self.ddict_from_gui()
+        self.update_signal.emit(PARAMS)
+    
+    def ddict_from_gui(self):
+        """ Return GUI widget values as parameter dictionary """
+        ddict = dict(lfp_fs           = self.lfp_fs.value(),
+                     theta            = self.theta.get_values(),
+                     slow_gamma       = self.slow_gamma.get_values(),
+                     fast_gamma       = self.fast_gamma.get_values(),
+                     ds_freq          = self.ds_freq.get_values(),
+                     swr_freq         = self.swr_freq.get_values(),
+                     ds_height_thr    = self.ds_height_thr.value(),
+                     ds_dist_thr      = self.ds_dist_thr.value(),
+                     ds_prom_thr      = self.ds_prom_thr.value(),
+                     ds_wlen          = self.ds_wlen.value(),
+                     swr_ch_bound     = self.swr_ch_bound.value(),
+                     swr_height_thr   = self.swr_height_thr.value(),
+                     swr_min_thr      = self.swr_min_thr.value(),
+                     swr_dist_thr     = self.swr_dist_thr.value(),
+                     swr_min_dur      = self.swr_min_dur.value(),
+                     swr_freq_thr     = self.swr_freq_thr.value(),
+                     swr_freq_win     = self.swr_freq_win.value(),
+                     swr_maxamp_win   = self.swr_maxamp_win.value(),
+                     csd_method       = self.csd_method.currentText().lower(),
+                     f_type           = self.f_type.currentText().lower(),
+                     f_order          = self.f_order.value(),
+                     f_sigma          = self.f_sigma.value(),
+                     vaknin_el        = not bool(self.vaknin_el.currentIndex()),
+                     tol              = self.tol.value(),
+                     spline_nsteps    = self.spline_nsteps.value(),
+                     src_diam         = self.src_diam.value(),
+                     src_h            = self.src_h.value(),
+                     cond             = self.cond.value(),
+                     cond_top         = self.cond_top.value(),
+                     clus_algo        = self.clus_algo.currentText().replace('-','').lower(),
+                     nclusters        = self.nclusters.value(),
+                     eps              = self.eps.value(),
+                     min_clus_samples = self.min_clus_samples.value(),
+                     el_w             = self.el_w.value(),
+                     el_h             = self.el_h.value(),
+                     el_shape         = self.el_shape.currentText().replace('angle','').lower()
+                     )
+        return ddict
+        
+    def update_gui_from_ddict(self, ddict):
+        """ Set GUI widget values from input ddict """
+        param_dict = dict(self.ddict_from_gui())
+        param_dict.update(ddict)
+        # data processing
+        self.lfp_fs.setValue(param_dict['lfp_fs'])
+        self.theta.box0.setValue(param_dict['theta'][0])
+        self.theta.box1.setValue(param_dict['theta'][1])
+        self.slow_gamma.box0.setValue(param_dict['slow_gamma'][0])
+        self.slow_gamma.box1.setValue(param_dict['slow_gamma'][1])
+        self.fast_gamma.box0.setValue(param_dict['fast_gamma'][0])
+        self.fast_gamma.box1.setValue(param_dict['fast_gamma'][1])
+        self.ds_freq.box0.setValue(param_dict['ds_freq'][0])
+        self.ds_freq.box1.setValue(param_dict['ds_freq'][1])
+        self.swr_freq.box0.setValue(param_dict['swr_freq'][0])
+        self.swr_freq.box1.setValue(param_dict['swr_freq'][1])
+        self.ds_height_thr.setValue(param_dict['ds_height_thr'])
+        self.ds_dist_thr.setValue(int(param_dict['ds_dist_thr']))
+        self.ds_prom_thr.setValue(param_dict['ds_prom_thr'])
+        self.ds_wlen.setValue(int(param_dict['ds_wlen']))
+        self.swr_ch_bound.setValue(int(param_dict['swr_ch_bound']))
+        self.swr_height_thr.setValue(param_dict['swr_height_thr'])
+        self.swr_min_thr.setValue(param_dict['swr_min_thr'])
+        self.swr_dist_thr.setValue(int(param_dict['swr_dist_thr']))
+        self.swr_min_dur.setValue(int(param_dict['swr_min_dur']))
+        self.swr_freq_thr.setValue(param_dict['swr_freq_thr'])
+        self.swr_freq_win.setValue(int(param_dict['swr_freq_win']))
+        self.swr_maxamp_win.setValue(int(param_dict['swr_maxamp_win']))
+        # DS classification
+        self.csd_method.setCurrentText(param_dict['csd_method'].capitalize())
+        self.f_type.setCurrentText(param_dict['f_type'].capitalize())
+        self.f_order.setValue(int(param_dict['f_order']))
+        self.f_sigma.setValue(param_dict['f_sigma'])
+        self.vaknin_el.setCurrentIndex(int(not bool(param_dict['vaknin_el'])))
+        self.tol.setValue(param_dict['tol'])
+        self.spline_nsteps.setValue(int(param_dict['spline_nsteps']))
+        self.src_diam.setValue(param_dict['src_diam'])
+        self.src_h.setValue(param_dict['src_h'])
+        self.cond.setValue(param_dict['cond'])
+        self.cond_top.setValue(param_dict['cond_top'])
+        self.clus_algo.setCurrentIndex(['kmeans','dbscan'].index(param_dict['clus_algo']))
+        self.nclusters.setValue(int(param_dict['nclusters']))
+        self.eps.setValue(param_dict['eps'])
+        self.min_clus_samples.setValue(int(param_dict['min_clus_samples']))
+        self.el_w.setValue(param_dict['el_w'])
+        self.el_h.setValue(param_dict['el_h'])
+        self.el_shape.setCurrentIndex(['circle','square','rect'].index(param_dict['el_shape']))
+
+class MsgboxParams(Msgbox):
+    PARAM_FILE = None
+    def __init__(self, filepath='', title='Select parameter file', parent=None):
+        # try loading parameters
+        params, invalid_keys = ephys.read_param_file(filepath=filepath)
+        fname = os.path.basename(filepath)
+        if len(invalid_keys) == 0:
+            msg = f'<h3>Parameter file <code>{fname}</code> not found.</h3>'
+            sub_msg = ''
+        else:
+            msg = f'<h3>Parameter file <code>{fname}</code> contains invalid value(s).</h3>'
+            sub_msg = f'<hr><code><u>MISSING PARAMS</u>: {", ".join(invalid_keys)}</code>'
+            
+        super().__init__(msg, sub_msg, title, no_buttons=False, parent=parent)
+        #self.setStandardButtons(QtWidgets.QMessageBox.Close)
+        self.open_btn = QtWidgets.QPushButton('Select existing file')
+        self.save_btn = QtWidgets.QPushButton('Create new file')
+        self.bbox.layout().addWidget(self.open_btn)
+        self.bbox.layout().addWidget(self.save_btn)
+        
+        self.open_btn.clicked.connect(self.choose_param_file)
+        self.save_btn.clicked.connect(self.create_param_file)
+    
+    def choose_param_file(self):
+        params, fpath = FileDialog.load_file(filetype='param', parent=self)
+        if params is not None:
+            print(f'params = {params}')
+            self.PARAM_FILE = str(fpath)
+            self.accept()
+    
+    def create_param_file(self):
+        self.param_dlg = ParamSettings(ddict=ephys.get_original_defaults(), parent=self)
+        self.param_dlg.show()
+        self.param_dlg.raise_()
+        res = self.param_dlg.exec()
+        if res:
+            self.PARAM_FILE = str(self.param_dlg.SAVE_LOCATION)
+            self.accept()
+        
+        
+class ParamSettings(QtWidgets.QDialog):
+    
+    def __init__(self, ddict={}, parent=None):
+        super().__init__(parent)
+        
+        # initialize parameter input widget
+        self.main_widget = ParamObject(ddict)
+        self.PARAMS = self.main_widget.ddict_from_gui()
+        self.PARAMS_ORIG = dict(self.PARAMS)
+        
+        self.gen_layout()
+        self.connect_signals()
+        
+        QtCore.QTimer.singleShot(50, lambda: self.qscroll.setMinimumWidth(int(self.main_widget.width())))
+        
+    def gen_layout(self):
+        # embed main parameter widget in scroll area
+        self.main_widget.setContentsMargins(0,0,15,0)
+        self.qscroll = QtWidgets.QScrollArea()
+        self.qscroll.horizontalScrollBar().hide()
+        self.qscroll.setWidgetResizable(True)
+        self.qscroll.setWidget(self.main_widget)
+        left_hash = QtWidgets.QLabel('#####')
+        right_hash = QtWidgets.QLabel('#####')
+        title = QtWidgets.QLabel('Default Parameters')
+        for lbl in [left_hash, right_hash, title]:
+            lbl.setAlignment(QtCore.Qt.AlignCenter)
+            lbl.setStyleSheet('QLabel {'
+                              'font-size : 18pt;'
+                              'font-weight : bold;'
+                              'text-decoration : none;'
+                              '}')
+        title_widget = QtWidgets.QFrame()
+        title_widget.setFrameShape(QtWidgets.QFrame.Panel)
+        title_widget.setFrameShadow(QtWidgets.QFrame.Sunken)
+        title_widget.setLineWidth(3)
+        title_widget.setMidLineWidth(3)
+        title_row = QtWidgets.QHBoxLayout(title_widget)
+        title_row.addWidget(left_hash, stretch=0)
+        title_row.addWidget(title, stretch=2)
+        title_row.addWidget(right_hash, stretch=0)
+        bbox = QtWidgets.QHBoxLayout()
+        self.save_btn = QtWidgets.QPushButton('Save')
+        #self.save_btn.setEnabled(False)
+        self.reset_btn = QtWidgets.QPushButton('Reset parameters')
+        self.reset_btn.setEnabled(False)
+        self.close_btn = QtWidgets.QPushButton('Close')
+        bbox.addWidget(self.save_btn)
+        bbox.addWidget(self.reset_btn)
+        bbox.addWidget(self.close_btn)
+        
+        self.layout = QtWidgets.QVBoxLayout(self)
+        #self.layout.setSpacing(20)
+        self.layout.addWidget(title_widget, stretch=0)
+        self.layout.addWidget(self.qscroll, stretch=2)
+        self.layout.addLayout(bbox, stretch=0)
+    
+    def connect_signals(self):
+        """ Connect widget signals to functions """
+        self.main_widget.update_signal.connect(self.update_slot)
+        self.save_btn.clicked.connect(self.save_param_file)
+        self.reset_btn.clicked.connect(self.reset_params)
+        self.close_btn.clicked.connect(self.reject)
+    
+    def update_slot(self, PARAMS):
+        """ Update parameter dictionary based on user input """
+        self.PARAMS.update(PARAMS)
+        x = not all([self.PARAMS[k] == self.PARAMS_ORIG[k] for k in PARAMS.keys()])
+        #self.save_btn.setEnabled(x)
+        self.reset_btn.setEnabled(x)
+    
+    def reset_params(self):
+        """ Reset parameters to original values """
+        self.main_widget.update_gui_from_ddict(self.PARAMS_ORIG)
+    
+    def save_param_file(self):
+        fpath = FileDialog.save_file(data_object=self.PARAMS, filetype='param', parent=self)
+        if fpath:
+            self.SAVE_LOCATION = fpath
+            print('accept!')
+            self.accept()
+
 
 class FileDialog(QtWidgets.QFileDialog):
     array_exts = ['.npy', '.mat']#, '.csv']
     probe_exts = ['.json', '.prb', '.mat']
+    LOADED_DATA = None
     
-    def __init__(self, init_ddir='', load_or_save='load', overwrite_mode=0, 
-                 is_directory=True, is_probe=False, is_array=False, parent=None, **kwargs):
+    def __init__(self, init_ddir='', load_or_save='load', 
+                 is_directory=True, is_probe=False, is_array=False, is_param=False, 
+                 parent=None, **kwargs):
         """
         init_ddir: optional starting directory
-        load_or_save: "load" in existing directory/file or "save" new one (not recommended)
+        load_or_save: "load" in existing directory/file or "save" new one
         is_directory: allow selection of all files (False) or only directories (True)
-        is_probe: add filter for valid probe filetypes
+        is_probe: load probe object from configuration file
+        is_array: load 2D array from raw data file
+        is_param: load parameter dictionary from .txt file
         """
         super().__init__(parent)
         self.load_or_save = load_or_save
-        self.overwrite_mode = overwrite_mode  # 0=add to folder, 1=overwrite files
+        self.is_probe, self.is_array, self.is_param = is_probe, is_array, is_param
         self.probe_exts = kwargs.get('probe_exts', self.probe_exts)
         self.array_exts = kwargs.get('array_exts', self.array_exts)
         
@@ -804,36 +1623,33 @@ class FileDialog(QtWidgets.QFileDialog):
         
         # filter for array/probe files
         fx = lambda llist: ' '.join([*map(lambda x: '*'+x, llist)])
-        if is_probe or is_array:
+        if is_probe or is_array or is_param:
             is_directory = False
             if is_probe:
-                ffilter = f'Probe files ({fx(self.probe_exts)})'  #f"Probe files ({' '.join([*map(lambda x: '*'+x, self.probe_exts)])})"
-            else:
+                ffilter = f'Probe files ({fx(self.probe_exts)})'
+            elif is_array:
                 ffilter = f'Data files ({fx(self.array_exts)})'
+            elif is_param:
+                ffilter = 'Text file (*.txt)'
             self.setNameFilter(ffilter)
             if self.load_or_save=='save': 
                 self.setAcceptMode(self.AcceptSave)
+        self.is_directory = is_directory
             
         # allow directories only
-        if is_directory:
+        if self.is_directory:
             self.setFileMode(self.Directory)
         else:
             if self.load_or_save == 'load':
                 self.setFileMode(self.ExistingFile)  # allow existing files
-            else:
+            elif self.load_or_save == 'save':
                 self.setFileMode(self.AnyFile)       # allow any file name
         
         try: self.setDirectory(init_ddir)
         except: print('init_ddir argument in FileDialog is invalid')
         self.setOptions(options)
         self.connect_signals()
-        
-        # if is_probe and self.load_or_save == 'save':
-        #     print('hi')
-            
-        #     self.fx = lambda txt: any(map(lambda ext: txt.endswith(ext), self.probe_exts))
-        #     self.lineEdit.textChanged.connect(lambda txt: self.btn.setEnabled(self.fx(txt)))
-    
+        self.show()
     
     def connect_signals(self):
         self.btn = self.findChild(QtWidgets.QPushButton)
@@ -842,7 +1658,6 @@ class FileDialog(QtWidgets.QFileDialog):
         self.view = self.stackedWidget.findChild(QtWidgets.QListView)
         self.view.selectionModel().selectionChanged.connect(self.updateText)
     
-    
     def updateText(self, selected, deselected):
         if selected.indexes() == []:
             return
@@ -850,99 +1665,96 @@ class FileDialog(QtWidgets.QFileDialog):
         txt = self.view.selectionModel().currentIndex().data()
         self.lineEdit.setText(txt)
     
-    @classmethod
-    def load_array_file(cls, init_ddir=ephys.base_dirs()[0], parent=None, **kwargs):
-        pyfx.qapp()
-        dlg = cls(init_ddir=init_ddir, is_array=True, parent=parent, **kwargs)
-        dlg.show()
-        dlg.raise_()
-        res = dlg.exec()
-        if not res: return
-        
-        # get filepath, try loading data
-        fpath = dlg.selectedFiles()[0]
-        data = ephys.read_array_file(fpath)
-        if data is None:
-            msgbox = MsgboxError('The following is not a valid array:',
-                                 sub_msg=f'<nobr><code>{fpath}</code></nobr>')
-            msgbox.sub_label.setWordWrap(False)
-            msgbox.exec()
-            return
-        return (data, fpath)
-        
-        
-    @classmethod
-    def load_probe_file(cls, init_ddir=ephys.base_dirs()[2], parent=None, **kwargs):
-        pyfx.qapp()
-        # run file dialog with probe file settings
-        dlg = cls(init_ddir, is_probe=True, parent=parent, **kwargs)
-        dlg.show()
-        dlg.raise_()
-        res = dlg.exec()
-        if not res: return
-        # get filepath, try loading probe object
-        fpath = dlg.selectedFiles()[0]
-        probe = ephys.read_probe_file(fpath)
-        if probe is None:
-            msgbox = MsgboxError(invalid_probe=fpath)
-            msgbox.exec()
-            return
-        return probe
-    
-    @classmethod
-    def save_probe_file(cls, probe, init_ddir=ephys.base_dirs()[2], parent=None, **kwargs):
-        pyfx.qapp()
-        # 
-        init_fname = f'{probe.name}_config.json'
-        dlg = cls(init_ddir, is_probe=True, load_or_save='save', parent=parent, **kwargs)
-        # add validator for supported file extensions
-        dlg.fx = lambda txt: any(map(lambda ext: txt.endswith(ext), dlg.probe_exts))
-        dlg.lineEdit.textChanged.connect(lambda txt: dlg.btn.setEnabled(dlg.fx(txt)))
-        dlg.lineEdit.setText(init_fname)
-        dlg.show()
-        dlg.raise_()
-        res = dlg.exec()
-        if res:
-            # write probe file to selected location
-            fpath = dlg.selectedFiles()[0]
-            res = ephys.write_probe_file(probe, fpath)
-            if res:
-                print('Probe saved!')
-            return res
-        return False
-        # # probe filename convention: [PROBE NAME]_config.[VALID EXTENSION]
-        # extension = self.save_exts.currentText()
-        # filename = f'{self.probe.name}_config{extension}'
-        # fpath = str(Path(ephys.base_dirs()[2], filename))
-        # if os.path.exists(fpath):
-        #     msgbox = gi.MsgboxWarning(overwrite_file=fpath)
-        #     res = msgbox.exec()
-        #     if res != QtWidgets.QMessageBox.Yes:
-        #         return
-        # # save probe file in desired file format
-        # res = ephys.write_probe_file(self.probe, fpath)
-        # if res:
-        #     msgbox = gi.MsgboxSave('Probe saved!<br>Exit window?', parent=self)
-        #     res = msgbox.exec()
-        #     if res == QtWidgets.QMessageBox.Yes:
-        #         self.accept()
-        # self.saveAction.setEnabled(False)
-        # self.save_exts.setEnabled(False)
-        
+    def file_validation(self):
+        f = self.selectedFiles()[0]
+        if self.is_probe:    # probe object (or None)
+            self.LOADED_DATA = ephys.read_probe_file(f)
+            filetype='probe'
+        elif self.is_array:  # data array (or None)
+            self.LOADED_DATA = ephys.read_array_file(f)
+            filetype='array'
+        elif self.is_param:  # parameter dictionary (or None)
+            self.LOADED_DATA = ephys.read_param_file(f)[0]
+            filetype='param'
+        is_valid = bool(self.LOADED_DATA is not None)
+        return is_valid, f, filetype
     
     def accept(self):
-        if self.load_or_save == 'save':
+        if self.load_or_save=='load' and self.is_directory==False:
+            is_valid, filepath, filetype = self.file_validation()
+            if not is_valid:
+                _ = MsgboxInvalid.invalid_file(filepath=filepath, filetype=filetype)
+                self.LOADED_DATA = None
+                return
+        elif self.load_or_save == 'save':
             ddir = self.directory().path()
             if self.fileMode()==self.Directory and len(os.listdir(ddir))>0:
                 res = MsgboxWarning.overwrite_warning(ddir, parent=self)
-                # if res:
-                #     shutil.rmtree(self.processed_ddir)
             else:
                 res = MsgboxWarning.overwrite_warning(self.selectedFiles()[0], parent=self)
             if not res: return
         QtWidgets.QDialog.accept(self)
     
-    
+    @classmethod
+    def get_file_kwargs(cls, filetype, init_ddir=None):
+        """ Set keyword args based on file type/initial directory """
+        kwargs = dict(init_ddir='', is_probe=False, is_array=False, is_param=False)
+        if filetype == 'probe':
+            kwargs['init_ddir'] = ephys.base_dirs()[2]
+            kwargs['is_probe'] = True
+        elif filetype == 'array':
+            kwargs['init_ddir'] = ephys.base_dirs()[0]
+            kwargs['is_array'] = True
+        elif filetype == 'param':
+            kwargs['init_ddir'] = str(os.getcwd())
+            kwargs['is_param'] = True
+        if init_ddir is not None:
+            kwargs['init_ddir'] = init_ddir
+        return kwargs
+        
+    @classmethod
+    def load_file(cls, filetype, init_ddir=None, parent=None):
+        assert filetype in ['probe','array','param']
+        kwargs = cls.get_file_kwargs(filetype, init_ddir=init_ddir)
+        # initialize file dialog
+        dlg = cls(parent=parent, **kwargs)
+        res = dlg.exec()
+        if res:
+            return (dlg.LOADED_DATA, dlg.selectedFiles()[0])
+        else:
+            return (None, None)
+        
+
+    @classmethod
+    def save_file(cls, data_object, filetype, init_ddir=None, parent=None):
+        assert filetype in ['probe','param']
+        kwargs = cls.get_file_kwargs(filetype, init_ddir=init_ddir)
+        
+        # initialize file dialog
+        pyfx.qapp()
+        dlg = cls(load_or_save='save', parent=parent, **kwargs)
+        if filetype == 'probe':   # filter for .json, .prb, and .mat extensions
+            init_fname = f'{data_object.name}_config.json'
+            dlg.fx = lambda txt: any(map(lambda ext: txt.endswith(ext), dlg.probe_exts))
+        elif filetype == 'param': # filter for .txt extension
+            init_fname = 'default_params.txt'
+            dlg.fx = lambda txt: bool(txt.endswith('.txt'))
+        dlg.lineEdit.textChanged.connect(lambda txt: dlg.btn.setEnabled(dlg.fx(txt)))
+        dlg.lineEdit.setText(init_fname)
+        dlg.show()
+        dlg.raise_()
+        res = dlg.exec()
+        # return filepath for successful save, None otherwise
+        if res:
+            fpath = str(dlg.selectedFiles()[0])
+            if filetype == 'probe':    # write probe file
+                res2 = ephys.write_probe_file(data_object, fpath)
+            elif filetype == 'param':  # write parameter file
+                res2 = ephys.write_param_file(data_object, fpath)
+            if res2:
+                print(f'{filetype.capitalize()} file saved!')
+                return fpath
+        return None
 
 
 class Popup(QtWidgets.QDialog):
@@ -955,15 +1767,13 @@ class Popup(QtWidgets.QDialog):
         for widget in widgets:
             self.layout.addWidget(widget)
         
-        
     def center_window(self):
         qrect = self.frameGeometry()  # proxy rectangle for window with frame
         screen_rect = pyfx.ScreenRect()
         qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
         self.move(qrect.topLeft())
         
-
-
+        
 class MatplotlibPopup(Popup):
     """ Simple popup window to display Matplotlib figure """
     def __init__(self, fig, toolbar_pos='top', title='', parent=None):
@@ -993,196 +1803,13 @@ class MatplotlibPopup(Popup):
     def closeEvent(self, event):
         plt.close()
         self.deleteLater()
-
-
-def create_widget_row(key, val, param_type, description='', **kw):
-    """
-    key, val - parameter name, value
-    param_type - 'num', 'int', 'keyword', 'text', 'bool', 'freq_band'
-    """
-    def set_val(w, val, **kw):
-        if w.minimum() > val: w.setMinimum(val)
-        if w.maximum() < val: w.setMaximum(val)
-        if 'mmin' in kw    : w.setMinimum(kw['mmin'])
-        if 'mmax' in kw    : w.setMaximum(kw['mmax'])
-        if 'step' in kw   : w.setSingleStep(kw['step'])
-        if 'suffix' in kw : w.setSuffix(kw['suffix'])
-        if 'dec' in kw and w.__class__ == QtWidgets.QDoubleSpinBox:
-            w.setDecimals(kw['dec'])
-        w.setValue(val)
-        return w
-    
-    lbl = QtWidgets.QLabel(key)
-    lbl.setToolTip(description)
-    if param_type in ['num','int']:
-        if param_type == 'int':
-            w = QtWidgets.QSpinBox()
-            val = int(val)
-        else: 
-            w = QtWidgets.QDoubleSpinBox()
-        w = set_val(w, val, **kw)
-    elif param_type == 'keyword':
-        w = QtWidgets.QComboBox()
-        items = kw.get('opts', [])
-        if val not in items: items.insert(0, val)
-        w.addItems(items)
-        w.setCurrentText(val)
-    elif param_type == 'text':
-        w = QtWidgets.QLineEdit()
-        w.setText(val)
-    else:
-        # hbox = QtWidgets.QWidget()
-        # hlay = QtWidgets.QHBoxLayout(hbox)
-        # hlay.setSpacing(0)
-        if param_type == 'bool':
-            w0 = QtWidgets.QRadioButton('True')
-            w0.setChecked(bool(val)==True)
-            w1 = QtWidgets.QRadioButton('False')
-            w1.setChecked(bool(val)==False)
-        elif param_type == 'freq_band':
-            w0 = QtWidgets.QDoubleSpinBox()
-            w0 = set_val(w0, val[0], **kw)
-            w1 = QtWidgets.QDoubleSpinBox()
-            w1 = set_val(w1, val[1], **kw)
-            # dash = QtWidgets.QLabel(' - ')
-            # dash.setAlignment(QtCore.Qt.AlignCenter)
-            # hlay.addWidget(dash)
-        # hlay.insertWidget(0, w0)
-        # hlay.insertWidget(-1, w1)
-        w = [w0, w1]
-    return lbl, w
-
-
-def create_fband_row(w0, w1, mid=' - '):
-    hlay = QtWidgets.QHBoxLayout()
-    hlay.setSpacing(0)
-    midw = QtWidgets.QLabel(mid)
-    midw.setAlignment(QtCore.Qt.AlignCenter)
-    hlay.addWidget(w0)
-    hlay.addWidget(midw)
-    hlay.addWidget(w1)
-    return hlay
-
-class ParamWidgets(object):
-    
-    def __init__(self, PARAMS):
-        D = pd.Series(PARAMS)
-        L = {}
-        W = {}
-        HLAY = {}
-        
-        # downsampled LFP
-        L['lfp_fs'], W['lfp_fs'] = create_widget_row('lfp_fs', D.lfp_fs, 'int', mmax=30000, suffix=' Hz')
-        
-        # theta, slow gamma, and fast gamma bands, DS bandpass, and SWR bandpass
-        for k in ['theta', 'slow_gamma', 'fast_gamma', 'ds_freq', 'swr_freq']:
-            L[k], W[k] = create_widget_row(k, D[k], 'freq_band', dec=1, mmax=1000, suffix=' Hz')
-            HLAY[k] = create_fband_row(*W[k])
-        
-        # DS detection params
-        L['ds_height_thr'], W['ds_height_thr'] = create_widget_row('ds_height_thr', D['ds_height_thr'], 'num', dec=1, step=0.1, suffix=' STD')
-        L['ds_dist_thr'], W['ds_dist_thr'] = create_widget_row('ds_dist_thr', D['ds_dist_thr'], 'num', dec=1, step=0.1, suffix=' s')
-        L['ds_prom_thr'], W['ds_prom_thr'] = create_widget_row('ds_prom_thr', D['ds_prom_thr'], 'num', dec=1, step=0.1)
-        L['ds_wlen'], W['ds_wlen'] = create_widget_row('ds_wlen', D['ds_wlen'], 'num', dec=3, step=0.005, suffix=' s')
-        
-        # SWR detection params
-        L['swr_ch_bound'], W['swr_ch_bound'] = create_widget_row('swr_ch_bound', D['swr_ch_bound'], 'int', suffix=' channels')
-        L['swr_height_thr'], W['swr_height_thr'] = create_widget_row('swr_height_thr', D['swr_height_thr'], 'num', dec=1, step=0.1, suffix=' STD')
-        L['swr_min_thr'], W['swr_min_thr'] = create_widget_row('swr_min_thr', D['swr_min_thr'], 'num', dec=1, step=0.1, suffix=' STD')
-        L['swr_dist_thr'], W['swr_dist_thr'] = create_widget_row('swr_dist_thr', D['swr_dist_thr'], 'num', dec=1, step=0.1, suffix=' s')
-        L['swr_min_dur'], W['swr_min_dur'] = create_widget_row('swr_min_dur', D['swr_min_dur'], 'int', mmax=1000, suffix=' ms')
-        L['swr_freq_thr'], W['swr_freq_thr'] = create_widget_row('swr_freq_thr', D['swr_freq_thr'], 'num', mmax=1000, dec=1, step=1, suffix=' Hz')
-        L['swr_freq_win'], W['swr_freq_win'] = create_widget_row('swr_freq_win', D['swr_freq_win'], 'int', mmax=1000, suffix=' ms')
-        L['swr_maxamp_win'], W['swr_maxamp_win'] = create_widget_row('swr_maxamp_win', D['swr_maxamp_win'], 'int', mmax=1000, suffix=' ms')
-        
-        # CSD calculation params
-        methods = ['standard', 'delta', 'step', 'spline']
-        filters = ['gaussian','identity','boxcar','hamming','triangular']
-        L['csd_method'], W['csd_method'] = create_widget_row('csd_method', D['csd_method'], 'keyword',opts=methods)
-        L['f_type'], W['f_type'] = create_widget_row('f_type', D['f_type'], 'keyword',opts=filters)
-        L['f_order'], W['f_order'] = create_widget_row('f_order', D['f_order'], 'int')
-        L['f_sigma'], W['f_sigma'] = create_widget_row('f_sigma', D['f_sigma'], 'num', dec=1, step=0.1)
-        L['tol'], W['tol'] = create_widget_row('tol', D['tol'], 'num', dec=8, step=0.0000001)
-        L['spline_nsteps'], W['spline_nsteps'] = create_widget_row('spline_nsteps', D['spline_nsteps'], 'int')
-        L['vaknin_el'], W['vaknin_el'] = create_widget_row('vaknin_el', D['vaknin_el'], 'bool')
-
-        self.LABELS = L
-        self.WIDGETS = W
-        self.HLAY = HLAY
-        
-# class ParamView(QtWidgets.QDialog):
-#     def __init__(self, params=None, ddir=None, parent=None):
-#         super().__init__(parent)
-#         qrect = pyfx.ScreenRect(perc_height=0.5, perc_width=0.3, keep_aspect=False)
-#         self.setGeometry(qrect)
-        
-#         params = None
-#         # get info, convert to text string
-#         if params is None:
-#             params = ephys.read_param_file('default_params.txt')
-#         if 'RAW_DATA_FOLDER' in params: rdf = params.pop('RAW_DATA_FOLDER')
-#         if 'PROCESSED_DATA_FOLDER' in params: pdf = params.pop('PROCESSED_DATA_FOLDER')
         
         
-#         keys, vals = zip(*params.items())
-#         vstr = [*map(str,vals)]
-#         klen = max(map(len, keys))  # get longest keyword
-#         #vlen = max(map(len,vstr)) # get longest value string
-        
-#         rows3 = ['<pre>' + k + '_'*(klen-len(k)) + ' : ' + v + '</pre>' for k,v in zip(keys,vstr)]
-#         ttxt = ''.join(rows3)
-        
-#         self.textwidget = QtWidgets.QTextEdit(ttxt)
-        
-        
-#         # fmt = f'{{:^{klen}}} : {{:>{vlen}}}'
-#         # rows = [fmt.format(k,v) for k,v in zip(keys,vstr)]
-#         # TEXT = os.linesep.join(rows)
-            
-#         # a = 'i am a key'
-#         # b = 'i am a value'
-#         # TEXT = f'{a:<30} : {b:<60}'
-        
-#         qfont = QtGui.QFont("Monospace")
-#         qfont.setStyleHint(QtGui.QFont.TypeWriter)
-#         # qfont.setPointSize(10)
-#         # qfm = QtGui.QFontMetrics(qfont)
-            
-#         # create QTextEdit for displaying file
-        
-#         #self.textwidget.setAlignment(QtCore.Qt.AlignCenter)
-#         #self.textwidget.setFont(qfont)
-        
-#         # fm = self.textwidget.fontMetrics()
-#         # klen2 = max(map(fm.horizontalAdvance, keys))
-#         # vlen2 = max(map(fm.horizontalAdvance, vstr))
-#         # fmt2 = f'{{:<{klen2}}} {{:<{vlen2}}}'
-        
-#         # rows3 = [f'{k:>20} : {v}' for k,v in zip(keys,vstr)]
-        
-#         # rows2 = [fmt2.format(k,v) for k,v in zip(keys,vstr)]
-#         # TEXT2 = os.linesep.join(rows2)
-        
-        
-#         # for row in rows3:
-#         #     self.textwidget.append(row)
-#             #self.textwidget.appendPlainText(row)
-        
-        
-#         layout = QtWidgets.QVBoxLayout(self)
-#         layout.addWidget(self.textwidget)
-        
-    
 class InfoView(QtWidgets.QDialog):
     def __init__(self, info=None, ddir=None, parent=None):
         super().__init__(parent)
         qrect = pyfx.ScreenRect(perc_height=0.5, perc_width=0.3, keep_aspect=False)
         self.setGeometry(qrect)
-        
-        # get info, convert to text string
-        # if info is None:
-        #     info = ephys.load_recording_info(ddir)
-        #self.info_text = info2text(info)
         self.info_text = 'Sorry - no text here :('
         
         # create QTextEdit for displaying file
@@ -1239,8 +1866,7 @@ class SpinBoxDelegate(QtWidgets.QStyledItemDelegate):
         if editor.value() != index.data():
             model.setData(index, editor.value(), QtCore.Qt.EditRole)
             
-
-
+            
 class QtWaitingSpinner(QtWidgets.QWidget):
     # initialize class variables
     mColor = QtGui.QColor(QtCore.Qt.blue)
@@ -1358,8 +1984,6 @@ class QtWaitingSpinner(QtWidgets.QWidget):
                 self.parentWidget.setEnabled(False)
             elif self.disabledWidget is not None:
                 self.disabledWidget.setEnabled(False)
-        # if self.parentWidget() and self.mDisableParentWhenSpinning:
-        #     self.parentWidget().setEnabled(False)
         # start timer
         if not self.timer.isActive():
             self.timer.start()
@@ -1501,23 +2125,3 @@ class SpinnerWindow(QtWidgets.QWidget):
     @QtCore.pyqtSlot(str)
     def report_progress_string(self, txt):
         self.spinner_label.setText(txt)
-        
-if __name__ == '__main__':
-    app = QtWidgets.QApplication(sys.argv)
-    app.setStyle('Fusion')
-    app.setQuitOnLastWindowClosed(True)
-    
-    #ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/NN_JG008')
-    #popup = InfoView(ddir=ddir)
-    
-    arr = np.load('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/'
-                  'stanford/JF512/DownsampleLFP.npy')
-    
-    # popup = RawArrayLoader(arr)
-    
-    
-    # popup.show()
-    # popup.raise_()
-    
-    # sys.exit(app.exec())
-    

@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import probeinterface as prif
 import quantities as pq
+import warnings
 import pdb
 # custom modules
 import pyfx
@@ -99,32 +100,6 @@ def load_openephys_data(ddir):
     else: aux_mx = np.array([])
     
     return (pri_mx, aux_mx), fs, units
-    
-    #nch = raw_signal_array.shape[0]
-    #node_name = str(meta['recorded_processor']) + str(meta['recorded_processor_id'])
-    
-    # ch_names, units, bitvolts = zip(*[(d['channel_name'], d['units'], 
-    #                                    d['bit_volts']) for d in meta['channels']])
-    
-    # hstg = [(int(a[1:]),b,c) for [(a,b,c),d] in ch_info if d.startswith('Headstage')]
-    # dev_idx, units, bit_volts = map(list, zip(*hstg))
-    # aux = [(int(a[1:]),b,c) for [(a,b,c),d] in ch_info if d.startswith('ADC')]
-    # aux_idx, aux_units, aux_bit_volts = map(list, zip(*aux))
-    # collect recording info in dictionary
-    # info = pd.Series(dict(raw_data_path = ddir,
-    #                       recording_system = 'Open Ephys',
-    #                       units = units[0],
-    #                       ports = np.arange(len(continuous_list)),
-    #                       nprobes = len(continuous_list),
-    #                       probe_nch = [nch],
-                          
-    #                       fs = fs,
-    #                       nchannels = num_channels,
-    #                       nsamples = raw_signal_array.shape[1],
-    #                       tstart = tstart,
-    #                       tend = tend,
-    #                       dur = tend - tstart))
-    #return raw_signal_array, fs#, info
 
 
 def load_neuronexus_data(ddir):
@@ -170,25 +145,95 @@ def load_neuronexus_data(ddir):
         aux_mx = raw_signal_array[A_AUX : B_AUX]
     else: aux_mx = np.array([])
     
-    # collect recording info in dictionary
-    # info = pd.Series(dict(raw_data_path = ddir,
-    #                       recording_system = 'Allego NeuroNexus',
-    #                       units = units,
-    #                       ports = ports,
-    #                       nprobes = nprobes,
-    #                       probe_nch = probe_nch,
-                          
-    #                       fs = fs,
-    #                       nchannels = num_channels,
-    #                       nsamples = raw_signal_array.shape[1],
-    #                       tstart = tstart,
-    #                       tend = tend,
-    #                       dur = tend - tstart))
     return (pri_mx, aux_mx), fs, units#, info
 
 
+def load_ncs_file(file_path):
+    # make sure .ncs file exists
+    assert os.path.isfile(file_path) and file_path.endswith('.ncs')
+    
+    HEADER_LENGTH = 16 * 1024  # 16 kilobytes of header
+    NCS_SAMPLES_PER_RECORD = 512
+    NCS_RECORD = np.dtype([('TimeStamp',       np.uint64),       # Cheetah timestamp for this record. This corresponds to
+                                                                 # the sample time for the first data point in the Samples
+                                                                 # array. This value is in microseconds.
+                           ('ChannelNumber',   np.uint32),       # The channel number for this record. This is NOT the A/D
+                                                                 # channel number
+                           ('SampleFreq',      np.uint32),       # The sampling frequency (Hz) for the data stored in the
+                                                                 # Samples Field in this record
+                           ('NumValidSamples', np.uint32),       # Number of values in Samples containing valid data
+                           ('Samples',         np.int16, NCS_SAMPLES_PER_RECORD)])  # Data points for this record. Cheetah
+                                                                                    # currently supports 512 data points per
+                                                                                    # record. At this time, the Samples
+                                                                                    # array is a [512] array.
+    
+    def parse_header(raw_header):
+        """ Parse Neuralynx file header """
+        # decode header as iso-8859-1 (the spec says ASCII, but there is at least one case of 0xB5 in some headers)
+        raw_hdr = raw_header.decode('iso-8859-1')
+        hdr_lines = [line.strip() for line in raw_hdr.split('\r\n') if line != '']
+        # look for line identifiying Neuralynx file
+        if hdr_lines[0] != '######## Neuralynx Data File Header':
+            warnings.warn('Unexpected start to header: ' + hdr_lines[0])
+        # return header information as dictionary
+        tmp = [l.split() for l in hdr_lines[1:]]
+        tmp = [x + [''] if len(x)==1 else x for x in tmp]
+        header = {x[0].replace('-','') : ' '.join(x[1:]) for x in tmp}
+        return header
+    
+    # read in .ncs file
+    with open(file_path, 'rb') as fid:
+        # Read the raw header data (16 kb) from the file object fid. Restores the position in the file object after reading.
+        pos = fid.tell()
+        fid.seek(0)
+        raw_header = fid.read(HEADER_LENGTH).strip(b'\0')
+        records = np.fromfile(fid, NCS_RECORD, count=-1)
+        fid.seek(pos)
+    header = parse_header(raw_header)
+    fs = records['SampleFreq'][0]                   # get sampling rate
+    bit_volts = float(header['ADBitVolts']) * 1000  # convert ADC counts to mV
+
+    # load data
+    D = np.array(records['Samples'].reshape(-1) * bit_volts, dtype=np.float32)
+    ts = np.linspace(0, len(D) / fs, len(D))
+    return D, ts, fs
+
+
+def load_neuralynx_data(ddir, pprint=True, use_array=True, save_array=True):
+    """ Load raw data files from Neuralynx recording software """
+    # identify and sort all .ncs files in data directory
+    flist = np.array([f for f in os.listdir(ddir) if f.endswith('.ncs')])
+    fnums = [int(f.strip('CSC').strip('.ncs')) for f in flist]
+    fpaths = [str(Path(ddir, f)) for f in flist[np.argsort(fnums)]]
+    # get number of total channels, timestamps, and sampling rate
+    nch = len(fpaths)
+    _, ts, fs = load_ncs_file(fpaths[0])
+    if pprint: 
+        print(os.linesep + '###   LOADING NEURALYNX DATA   ###' + os.linesep)
+        
+    data_path = str(Path(ddir, 'DATA_ARRAY.npy'))
+    if use_array and os.path.isfile(data_path):
+        # load existing array
+        if pprint: print('Loading existing DATA_ARRAY.npy file ...')
+        pri_mx = np.load(data_path)
+    else:
+        print_progress = np.round(np.linspace(0, nch-1, 10)).astype('int')
+        # initialize data array (channels x timepoints)
+        pri_mx = np.empty((nch, len(ts)), dtype=np.float32)
+        for i,f in enumerate(fpaths):
+            if pprint and (i in print_progress):
+                print(f'Loading NCS file {i+1}/{nch} ...')
+            pri_mx[i,:] = load_ncs_file(f)[0]
+        if save_array:
+            print('Saving data array ...')
+            np.save(data_path, pri_mx)
+    if pprint: print('Done!' + os.linesep)
+    aux_mx = np.array([])
+    return (pri_mx, aux_mx), fs, 'mV'
+
+
 def load_raw_data(ddir, pprint=True):
-    """ Load raw data files from Open Ephys or NeuroNexus software """
+    """ Load raw data files from Open Ephys, NeuroNexus, or Neuralynx software """
     try:
         files = os.listdir(ddir)
     except:
@@ -206,21 +251,13 @@ def load_raw_data(ddir, pprint=True):
     elif len(xdat_files) > 0:
         if pprint: print('Loading NeuroNexus raw data ...')
         (pri_array, aux_array), fs, units = load_neuronexus_data(ddir)
+    # load Neuralynx data
+    elif len([f for f in files if f.endswith('.ncs')]) > 0:
+        (pri_array, aux_array), fs, units = load_neuralynx_data(ddir, pprint=pprint)
     # no valid raw data found
     else:
-        raise Exception(f'No raw Open Ephys (.oebin) or NeuroNexus (.xdat.json) files found in directory "{ddir}"')
+        raise Exception(f'No raw Open Ephys (.oebin), NeuroNexus (.xdat.json), or Neuralynx (.ncs) files found in directory "{ddir}"')
     return (pri_array, aux_array), fs, units
-    #return signal_array, fs#, info
-
-
-# def yargle(ddir, probe):
-#     raw_signal_array, info = load_raw_data(ddir)
-    
-#     nch = probe.get_contact_count()
-#     num_channels = raw_signal_array.shape[0]
-#     assert (num_channels % nch > 0)
-    
-#     probe_group = ephys.make_probe_group(probe, int(num_channels / nch))
     
 
 def get_idx_by_probe(probe):
@@ -256,10 +293,8 @@ def extract_data_by_probe(raw_signal_array, chMap, fs=30000, lfp_fs=1000, units=
     for idx in idx_by_probe:
         lfp = np.array([pyfx.Downsample(raw_signal_array[i], ds_factor)*cf for i in idx])
         lfp_list.append(lfp)
-        
-    # lfp_list = [extract_data(raw_signal_array, idx, fs=fs, lfp_fs=lfp_fs, 
-    #                          units=units, lfp_units=lfp_units) for idx in idx_by_probe]
     return lfp_list
+
 
 def process_probe_data(_lfp, lfp_time, lfp_fs, PARAMS, pprint=True):
     """ Filter LFPs, run ripple and DS detection on each channel """
@@ -307,7 +342,7 @@ def process_all_probes(lfp_list, lfp_time, lfp_fs, PARAMS, save_ddir, pprint=Tru
     if type(lfp_list) == np.ndarray:
         lfp_list = [lfp_list]
     bp_dicts = {'raw':[], 'theta':[], 'slow_gamma':[], 'fast_gamma':[], 'swr':[], 'ds':[]}
-    std_dfs, swr_dfs, ds_dfs, thresholds = [], [], [], []
+    std_dfs, swr_dfs, ds_dfs, thresholds, noise_trains = [], [], [], [], []
     
     for i,_lfp in enumerate(lfp_list):
         if pprint: print(f'\n#####   PROBE {i+1} / {len(lfp_list)}   #####\n')
@@ -318,12 +353,11 @@ def process_all_probes(lfp_list, lfp_time, lfp_fs, PARAMS, save_ddir, pprint=Tru
         swr_dfs.append(SWR_DF)
         ds_dfs.append(DS_DF)
         thresholds.append(THRESHOLDS)
+        noise_trains.append(np.zeros(len(_lfp), dtype='int'))
     ALL_STD = pd.concat(std_dfs, keys=range(len(std_dfs)), ignore_index=False)
     ALL_SWR = pd.concat(swr_dfs, keys=range(len(swr_dfs)), ignore_index=False)
     ALL_DS = pd.concat(ds_dfs, keys=range(len(ds_dfs)), ignore_index=False)
     
-    
-    pdb.set_trace()
     # save downsampled data
     if pprint: print('Saving files ...')
     if not os.path.isdir(save_ddir):
@@ -339,37 +373,20 @@ def process_all_probes(lfp_list, lfp_time, lfp_fs, PARAMS, save_ddir, pprint=Tru
     ALL_SWR.to_csv(Path(save_ddir, 'ALL_SWR'), index_label=False)
     ALL_DS.to_csv(Path(save_ddir, 'ALL_DS'), index_label=False)
     np.save(Path(save_ddir, 'THRESHOLDS.npy'), thresholds)
+    # initialize noise channels
+    np.save(Path(save_ddir, 'noise_channels.npy'), noise_trains)
     
     # save params and info file
     with open(Path(save_ddir, 'params.pkl'), 'wb') as f:
         pickle.dump(PARAMS, f)
-        
-    # with open(Path(save_ddir, 'info.pkl'), 'wb') as f:
-    #     pickle.dump(INFO, f)
     
     if pprint: print('Done!' + os.linesep)
-    
-    
-#%%
-# ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/raw_data/'
-#         'JG007_2_2024-07-09_15-40-43_openephys/Record Node 103/experiment1/recording1')
 
-ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/shank3_saved/'
-        'JG030_het/ALL_DS')
 
-    
-# def tmpl_info(lfp_list, lfp_fs, **kwargs):
-#     ddict = dict(raw_data_path='',
-#                  recording_system='unknown',
-#                  units='uV',
-#                  ports=[str(i) for i in range(len(lfp_list))],
-#                  nprobes=len(lfp_list),
-#                  probe_nch=[arr.shape[0] for arr in lfp_list],
-#                  fs=lfp_fs)
-#     ddict['nchannels']=np.sum(ddict['probe_nch'])
-#     ddict['nsamples']=lfp_list[0].shape[1]
-#     ddict['tstart']=0
-#     ddict['tend']=ddict['nsamples']/lfp_fs
-#     ddict['dur']=ddict['tend'] - ddict['tstart']
-#     ddict.update(**kwargs)
-#     return ddict
+def process_aux(aux_mx, fs, lfp_fs, save_ddir, pprint=True):
+    ds_factor = int(fs / lfp_fs)
+    for i,aux in enumerate(aux_mx):
+        if pprint: print(f'Saving AUX {i+1} / {len(aux_mx)} ...')
+        aux_dn = pyfx.Downsample(aux, ds_factor)
+        np.save(Path(save_ddir, f'AUX{i}.npy'), aux_dn)
+        

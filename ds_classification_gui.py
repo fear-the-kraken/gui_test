@@ -5,7 +5,6 @@ Created on Tue Aug 13 15:09:56 2024
 
 @author: amandaschott
 """
-import sys
 import os
 from pathlib import Path
 import numpy as np
@@ -13,9 +12,9 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import seaborn as sns
 import quantities as pq
+from copy import deepcopy
 from sklearn.decomposition import PCA
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
@@ -128,11 +127,16 @@ class IFigPCA(matplotlib.figure.Figure):
         self.DS_DF = DS_DF
         self.PARAMS = PARAMS
         
-        self.create_subplots()
+        init_btn = ['kmeans','dbscan'].index(self.PARAMS['clus_algo'])
+        self.create_subplots(init_btn=init_btn)
         self.plot_ds_pca(self.PARAMS['clus_algo'])  # initialize plot
+        
+        # set radio button
+        ##self.btns.set_active(ibtn)
+        
     
     
-    def create_subplots(self):
+    def create_subplots(self, init_btn=0):
         """ Set up main PCA plot and inset button axes """
         self.ax = self.add_subplot()
         # create inset axes for radio buttons
@@ -153,10 +157,9 @@ class IFigPCA(matplotlib.figure.Figure):
             return
         for item in self.ax.lines + self.ax.collections:
             item.remove()
-        
         alg = val.lower().replace('-','')
         pal = {1:(.84,.61,.66), 2:(.3,.18,.36), 0:(.7,.7,.7)}
-        (hue_col,name) = ('k_type','K-means') if alg=='kmeans' else ('db_type','DBSCAN') if alg=='dbscan' else (None,None)
+        (ibtn,hue_col,name) = (0,'k_type','K-means') if alg=='kmeans' else (1,'db_type','DBSCAN') if alg=='dbscan' else (None,None,None)
         hue_order = [x for x in [1,2,0] if x in self.DS_DF[hue_col].values]
         # plot PC1 vs PC2
         _ = sns.scatterplot(self.DS_DF, x='pc1', y='pc2', hue=hue_col, hue_order=hue_order,
@@ -166,11 +169,11 @@ class IFigPCA(matplotlib.figure.Figure):
         self.ax.legend(handles=handles, labels=labels, loc='upper right', draggable=True)
         self.ax.set(xlabel='Principal Component 1', ylabel='Principal Component 2')
         self.ax.set_title(f'PCA with {name} Clustering', fontdict=dict(fontweight='bold'))
+        
         sns.despine(self)
         self.canvas.draw_idle()
         
        
-
 
 class DSPlotBtn(QtWidgets.QPushButton):
     """ Checkable pushbutton with "Ctrl" modifier for multiple selection """
@@ -241,34 +244,27 @@ class DS_CSDWidget(QtWidgets.QFrame):
         # probe params
         self.gbox0 = QtWidgets.QGroupBox('Probe Settings')
         gbox0_grid = QtWidgets.QGridLayout(self.gbox0)
-        # inter-electrode distance
-        # eldist_lbl = QtWidgets.QLabel('Electrode distance:')
-        # #eldist_lbl.setAlignment(QtCore.Qt.AlignCenter)
-        # #eldist_lbl.setWordWrap(True)
-        # self.eldist_sbox = QtWidgets.QDoubleSpinBox()
-        # self.eldist_sbox.setDecimals(3)
-        # self.eldist_sbox.setSingleStep(0.005)
-        # self.eldist_sbox.setSuffix(' mm')
         # assumed source diameter
-        diam_lbl = QtWidgets.QLabel('Source diameter:')
+        diam_lbl = QtWidgets.QLabel('Source\ndiameter:')
+        diam_lbl.setAlignment(QtCore.Qt.AlignCenter)
         self.diam_sbox = QtWidgets.QDoubleSpinBox()
         self.diam_sbox.setDecimals(3)
         self.diam_sbox.setSingleStep(0.01)
         self.diam_sbox.setSuffix(' mm')
         # assumed source cylinder thickness
-        h_lbl = QtWidgets.QLabel('Source thickness:')
+        h_lbl = QtWidgets.QLabel('Source\nthickness:')
+        h_lbl.setAlignment(QtCore.Qt.AlignCenter)
         self.h_sbox = QtWidgets.QDoubleSpinBox()
         self.h_sbox.setDecimals(3)
         self.h_sbox.setSingleStep(0.01)
         self.h_sbox.setSuffix(' mm')
         # tissue conductivity
-        cond_lbl = QtWidgets.QLabel('Tissue conductivity:')
+        cond_lbl = QtWidgets.QLabel('Tissue\nconductivity:')
+        cond_lbl.setAlignment(QtCore.Qt.AlignCenter)
         self.cond_sbox = QtWidgets.QDoubleSpinBox()
         self.cond_sbox.setDecimals(3)
         self.cond_sbox.setSingleStep(0.01)
         self.cond_sbox.setSuffix(' S/m')
-        #gbox0_grid.addWidget(eldist_lbl, 0, 0)
-        #gbox0_grid.addWidget(self.eldist_sbox, 0, 1)
         gbox0_grid.addWidget(diam_lbl, 0, 0)
         gbox0_grid.addWidget(self.diam_sbox, 0, 1)
         gbox0_grid.addWidget(h_lbl, 1, 0)
@@ -407,7 +403,7 @@ class DS_CSDWidget(QtWidgets.QFrame):
     
     
     def ddict_from_gui(self):
-        """ Return GUI widget values as ddict """
+        """ Return GUI widget values as parameter dictionary """
         ddict = dict(csd_method       = self.csd_mode.currentText().lower(),
                      f_type           = self.csd_filter.currentText().lower(),
                      f_order          = self.csd_filter_order.value(),
@@ -424,9 +420,7 @@ class DS_CSDWidget(QtWidgets.QFrame):
                      nclusters        = self.nclus_sbox.value(),
                      eps              = self.eps_sbox.value(),
                      min_clus_samples = self.minN_sbox.value())
-        
-        ddict2 = ephys.read_param_file()
-        return ddict2
+        return ddict
         
     def update_filter_widgets(self):
         """ Enable/disable widgets based on selected filter """
@@ -458,7 +452,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
     cmap2 = pyfx.truncate_cmap(cmap, 0.2, 0.8)
     
     def __init__(self, ddir, iprb=0, PARAMS=None, parent=None):
-        super().__init__(parent)
+        super().__init__()
         qrect = pyfx.ScreenRect(perc_width=0.8, keep_aspect=False)
         self.setGeometry(qrect)
         self.ddir = ddir
@@ -468,6 +462,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         
         # required: event channels file, probe DS_DF file
         self.lfp_list, self.lfp_time, self.lfp_fs = ephys.load_lfp(ddir, 'raw', -1)
+        self.noise_list = ephys.load_noise_channels(ddir, -1)
         self.probe_group = prif.read_probeinterface(Path(ddir, 'probe_group'))
         self.load_probe_data(self.iprb)
         
@@ -482,8 +477,11 @@ class DS_CSDWindow(QtWidgets.QDialog):
             self.mean_csds_1 = self.get_csd_surround(self.csd_chs, self.idx_ds1, ddict, twin=0.05)
             self.mean_csds_2 = self.get_csd_surround(self.csd_chs, self.idx_ds2, ddict, twin=0.05)
         
-        
         self.plot_csd_window()  # CSD movable window
+        if self.csd_chs is not None:
+            tup = pyfx.Edges(self.csd_chs)
+            self.fig0.slider.set_val(tup)
+            
         if self.raw_csd is not None:  # DS peak CSD heatmaps
             self.plot_ds_csds(twin=0.05)
             
@@ -492,13 +490,31 @@ class DS_CSDWindow(QtWidgets.QDialog):
         
         if 'pc1' in self.DS_DF.columns:  # PCA scatterplot
             self.fig27.plot_ds_pca(self.PARAMS['clus_algo'])
-        
-        
+            init_btn = ['kmeans','dbscan'].index(self.PARAMS['clus_algo'])
+            self.fig27.btns.set_active(init_btn)
+    
+    
     def load_probe_data(self, iprb):
         """ Set data corresponding to the given probe """
         self.iprb = iprb
-        self.lfp = np.array(self.lfp_list[iprb])                    # set probe lfp
-        self.channels = np.arange(self.lfp.shape[0])
+        self.lfp_all = np.array(self.lfp_list[iprb])  # original LFP signals
+        self.channels = np.arange(self.lfp_all.shape[0])
+        self.lfp = deepcopy(self.lfp_all)             
+        self.lfp_interp = deepcopy(self.lfp_all)      # noisy channels are interpolated
+        self.NOISE_TRAIN = np.array(self.noise_list[iprb])
+        noise_idx = np.nonzero(self.NOISE_TRAIN)[0]
+        clean_idx = np.setdiff1d(np.arange(len(self.channels)), noise_idx)
+        for i in noise_idx:
+            self.lfp[i,:] = np.nan  # replace noisy channels in lfp with np.nan
+            # replace noisy channels in lfp_interp with average of two closest (clean) signals
+            if i==0: 
+                self.lfp_interp[i,:] = self.lfp_all[min(clean_idx)]
+            elif i > max(clean_idx):
+                self.lfp_interp[i,:] = self.lfp_all[max(clean_idx)]
+            else:
+                sig1 = self.lfp_all[pyfx.Closest(i, clean_idx[clean_idx < i])]
+                sig2 = self.lfp_all[pyfx.Closest(i, clean_idx[clean_idx > i])]
+                self.lfp_interp[i,:] = np.nanmean([sig1, sig2], axis=0)
         self.DS_DF = pd.read_csv(Path(self.ddir, f'DS_DF_{iprb}'))  # load DS dataframe
         self.iev = self.DS_DF.idx.values
         self.probe = self.probe_group.probes[iprb]
@@ -516,7 +532,7 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.norm_filt_csd  = csd_dict.get('norm_filt_csd')
         self.csd_chs        = csd_dict.get('csd_chs')
         if self.csd_chs is not None:
-            self.csd_lfp = self.lfp[self.csd_chs, :][:, self.iev]
+            self.csd_lfp = self.lfp_interp[self.csd_chs, :][:, self.iev]
         
         if 'type' in self.DS_DF.columns:
             # get table rows and recording indexes of DS1 vs DS2
@@ -529,22 +545,6 @@ class DS_CSDWindow(QtWidgets.QDialog):
             self.irows_ds2 = None
             self.idx_ds1   = None
             self.idx_ds2   = None
-        # initialize CSD worker object
-        #self.CSDW = CSD_Worker(self.lfp, self.lfp_fs, self.DS_DF, self.probe, dict(self.PARAMS))
-    
-    def get_csd(self, channels, idx, ddict):
-        csd_lfp = self.lfp[channels, :][:, idx]
-        csd_obj = ephys.get_csd_obj(csd_lfp, self.coord_electrode, ddict)
-        csds = ephys.csd_obj2arrs(csd_obj)
-        return (csd_lfp, *csds)
-        
-    def get_csd_surround(self, channels, idx, ddict, twin):
-        iwin = int(round(twin*self.lfp_fs))
-        mean_lfp = np.array([ephys.getavg(self.lfp[i], idx, iwin) for i in channels])
-        csd_obj = ephys.get_csd_obj(mean_lfp, self.coord_electrode, ddict)
-        mean_csds = ephys.csd_obj2arrs(csd_obj)
-        return (mean_lfp, *mean_csds)
-    
         
     def gen_layout(self):
         """ Set up layout """
@@ -625,11 +625,22 @@ class DS_CSDWindow(QtWidgets.QDialog):
         self.fig0.slider.on_changed(self.widget.update_ch_win)
         self.widget.go_btn.clicked.connect(self.calculate_csd)
         self.widget.save_btn.clicked.connect(self.save_csd)
-    
+        
+    def get_csd(self, channels, idx, ddict):
+        csd_lfp = self.lfp_interp[channels, :][:, idx]
+        csd_obj = ephys.get_csd_obj(csd_lfp, self.coord_electrode, ddict)
+        csds = ephys.csd_obj2arrs(csd_obj)
+        return (csd_lfp, *csds)
+        
+    def get_csd_surround(self, channels, idx, ddict, twin):
+        iwin = int(round(twin*self.lfp_fs))
+        mean_lfp = np.array([ephys.getavg(self.lfp_interp[i], idx, iwin) for i in channels])
+        csd_obj = ephys.get_csd_obj(mean_lfp, self.coord_electrode, ddict)
+        mean_csds = ephys.csd_obj2arrs(csd_obj)
+        return (mean_lfp, *mean_csds)
     
     def calculate_csd(self, btn=None, twin=0.05, twin2=0.1):
         """ Current source density (CSD) analysis """
-        #iwin = int(round(twin*self.lfp_fs))
         self.csd_chs = np.array(self.widget.csd_chs)
         ddict = self.widget.ddict_from_gui()
         
@@ -666,7 +677,9 @@ class DS_CSDWindow(QtWidgets.QDialog):
         # plot PCA scatterplot
         self.fig27.DS_DF = self.DS_DF
         self.plot_bar.fig27_btn.setEnabled(True)
+        init_btn = ['kmeans','dbscan'].index(self.PARAMS['clus_algo'])
         self.fig27.plot_ds_pca(self.PARAMS['clus_algo'])
+        self.fig27.btns.set_active(init_btn)
         
         # plot mean waveforms
         self.plot_ds_by_type(twin=twin)
@@ -679,7 +692,10 @@ class DS_CSDWindow(QtWidgets.QDialog):
         arr = np.array([ephys.getavg(self.lfp[i], self.iev, iwin) for i in self.channels])
         xax = np.linspace(-twin, twin, arr.shape[1])
         for irow,y in enumerate(arr):
-            _ = self.fig0.ax.plot(xax, -y+irow, color='black', lw=2)[0]
+            if self.NOISE_TRAIN[irow] == 1:  # for noisy signals, plot a flat line
+                _ = self.fig0.ax.plot(xax, np.repeat(irow, len(xax)), color='lightgray', lw=2)[0]
+            else:
+                _ = self.fig0.ax.plot(xax, -y+irow, color='black', lw=2)[0]
         self.fig0.ax.invert_yaxis()
         self.fig0.ax.lines[self.hil_chan].set(color='red', lw=3)
         self.fig0.ax.lines[self.ripple_chan].set(color='green', lw=3)
@@ -743,8 +759,8 @@ class DS_CSDWindow(QtWidgets.QDialog):
         rowplot(0, self.ds1_arr, self.mean_csds_1[2], self.mean_csds_1[0])
         rowplot(1, self.ds2_arr, self.mean_csds_2[2], self.mean_csds_2[0])
         self.type_axs[1][0].invert_yaxis()
-        self.type_axs[0][0].set_title('DS Type 1', fontdict=dict(fontweight='bold'))
-        self.type_axs[0][1].set_title('DS Type 2', fontdict=dict(fontweight='bold'))
+        self.type_axs[0][0].set_title(f'DS Type 1\nN={len(self.ds1_arr)}', fontdict=dict(fontweight='bold'))
+        self.type_axs[0][1].set_title(f'DS Type 2\nN={len(self.ds2_arr)}', fontdict=dict(fontweight='bold'))
         
         self.fig3.set_tight_layout(True)
         sns.despine(self.fig3)
@@ -808,29 +824,19 @@ class DS_CSDWindow(QtWidgets.QDialog):
         if res == QtWidgets.QMessageBox.Yes:
             self.accept()
     
+    
     def closeEvent(self, event):
         plt.close()
-        self.deleteLater()
+        event.accept()
 
 
 if __name__ == '__main__':
     # ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/raw_data/'
     #         'JG007_2_2024-07-09_15-40-43_openephys/Record Node 103/experiment1/recording1')
-    
-    ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/JG008')
+    #ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/JG008')
+    #ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/stanford/JF513_saved'
+    ddir = '/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/neuralynx_saved'
     pyfx.qapp()
-    
-    # NEW TO-DO LIST
-    # Annotate sample sizes on DS1 and DS2 neuron plots (plus axis labels and whatnot)
-    # Live CSD viewing in channel selection widget
-    # In PCA plot, want to be able to click dot and see its waveform
-    # Ambitious future: be able to manually annotate/reclassify/delete events
-    # Integrate ripple analysis?
-    # Add notes feature?
-    
-    #w = ChannelSelectionWindow(ppath, rec)
-    #w = DS_AnalysisWindow(ddir)
-    #PARAMS = ephys.load_recording_params(ddir)
     w = DS_CSDWindow(ddir, 0)
     w.show()
         

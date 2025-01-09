@@ -5,21 +5,15 @@ Created on Thu Oct  3 15:28:55 2024
 
 @author: amandaschott
 """
-import sys
 import os
 from pathlib import Path
-import shutil
-import matplotlib
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from PyQt5 import QtWidgets, QtCore, QtGui
 import time
 import pickle
 import quantities as pq
 import probeinterface as prif
-from probeinterface.plotting import plot_probe
 import pdb
 # custom modules
 import pyfx
@@ -82,13 +76,6 @@ btn_ss = ('QPushButton {'
           'QPushButton:pressed {'
           'background-color : rgba%s;'  # dark
           '}'
-          
-          # 'QPushButton:checked {'
-          # 'background-color : rgba%s;'  # dark
-          # #'outline : 2px solid red;'
-          # 'border : 3px solid red;'
-          # 'border-radius : 2px;'
-          # '}'
           )
 
 blue_btn_ss = ('QPushButton {'
@@ -186,20 +173,14 @@ class DirectorySelectionWidget(QtWidgets.QWidget):
             self.grid.setColumnStretch(0,0)
     
     def update_status(self, ddir, x=False):
-        try:
-            self.qedit_hbox.update_qedit(ddir, x)  # line edit
-            self.ddir_icon_btn.new_status(x)  # status icon
-        except:
-            print('fu')
-            #pdb.set_trace()
-        #self.ddir_icon_btn.setIcon(self.ddir_icon_btn.icons[int(x)]) 
+        self.qedit_hbox.update_qedit(ddir, x)  # line edit
+        self.ddir_icon_btn.new_status(x)  # status icon
         
 
 
 class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
     def __init__(self, init_ddir='', go_to_last=False, parent=None):
         super().__init__(parent)
-        #self.info = 
         self.probe_group = None
         self.probe_idx = -1
         self.probe = None
@@ -209,7 +190,7 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
             self.ddir = qfd.directory().path()
         else:
             if init_ddir == '':
-                _, self.ddir, _, _ = ephys.base_dirs()
+                self.ddir = ephys.base_dirs()[1]
             else:
                 self.ddir = init_ddir
         
@@ -259,21 +240,9 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
     
     def show_info_popup(self):
         fig = IFigProbe(self.probe)
-        fig.set_tight_layout(True)
         dlg = gi.MatplotlibPopup(fig, toolbar_pos='left')
         dlg.setMinimumHeight(600)
         dlg.exec()
-    
-    # def info_popup(self):
-    #     #dlg = QtWidgets.QDialog(self)
-    #     #layout = QtWidgets.QVBoxLayout(dlg)
-    #     self.
-    # def emit_signal(self):
-    #     if self.ab.option1_btn.isChecked():
-    #         self.launch_ch_selection_signal.emit()
-            
-    #     elif self.ab.option2_btn.isChecked():
-    #         self.launch_ds_class_signal.emit()
         
     def select_ddir(self):
         # open file popup to select processed data folder
@@ -294,14 +263,11 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
         self.info_view_btn.setVisible(x)
         if x:
             # read in recording info, clear and update probe dropdown menu
-            #self.info = ephys.load_recording_info(self.ddir)
             self.probe_group = prif.read_probeinterface(Path(self.ddir, 'probe_group'))
             items = [f'probe {i}' for i in range(len(self.probe_group.probes))]
             self.probe_dropdown.addItems(items)
         else:
             self.probe_group, self.probe, self.probe_idx = None, None, -1
-        #else:
-        #    self.info = None
         # probe index (e.g. 0,1,...) if directory is valid, otherwise -1
         self.probe_dropdown.blockSignals(False)
         #self.current_probe = self.probe_dropdown.currentIndex()
@@ -313,46 +279,29 @@ class ProcessedDirectorySelectionPopup(QtWidgets.QDialog):
         self.probe_idx = self.probe_dropdown.currentIndex()
         self.probe = self.probe_group.probes[self.probe_idx]
         self.ab.ddir_toggled(self.ddir, self.probe_idx)  # update action widgets
-    # def probegroup2probes(self, probe_group):
-    #     probe_group = prif.io.read_probeinterface(Path(self.ddir, 'probe_group'))
-    #     probes = list(probe_group.probes)
-    #     new_probes = [prb.copy() for prb in probe_group.probes]
         
-    #     orig_probe = probe_row.probe
-    #     new_probe = orig_probe.copy()
-    #     new_probe.annotate(**dict(orig_probe.annotations))
-    #     new_probe.set_shank_ids(np.array(orig_probe.shank_ids))
-    #     new_probe.set_contact_ids(np.array(orig_probe.contact_ids))
-    #     new_probe.set_device_channel_indices(np.array(orig_probe.device_channel_indices))
-    #     self.add_probe_row(new_probe)
-        
-    #     for prb in probe_group.probes:
-    #         new_probe = prb.copy()
-            
-    #         global_dvi = np.array(prb.device_channel_indices)
-    #         dvi = np.array((global_dvi - min(global_dvi)) / np.diff(sorted(global_dvi))[0], dtype='int')
-            
-    #     nprobes = len(probes)
-    #     nch_list = [prb.get_contact_count() for prb in probes]
-    #     # number of data rows between consecutive channels on the same probe
-    #     offset = np.diff(probes[0].contact_ids.astype('int'))[0]
-    #     if offset == 1:
-        
-            
-    #     start_row = 0
-        
-        
-    #     prb,prb2=probes
-        
-    #     prb.contact_ids.astype('int')
     
+class ParamFilePopup(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        txt = QtWidgets.QLabel('Parameter file not found')
+        bbox = QtWidgets.QHBoxLayout()
+        select_btn = QtWidgets.QPushButton('Select existing file')
+        create_btn = QtWidgets.QPushButton('Create new file')
+        bbox.addWidget(select_btn)
+        bbox.addWidget(create_btn)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(txt, stretch=2)
+        lay.addLayout(bbox, stretch=0)
+        
+        select_btn.clicked.connect(self.select_param_file)
+        create_btn.clicked.connect(self.create_param_file)
     
-
 
 class BaseFolderPopup(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Set base folders')
+        self.setWindowTitle('Base Folders')
         
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(20)
@@ -364,12 +313,19 @@ class BaseFolderPopup(QtWidgets.QDialog):
         fmt = '<code>{}</code>'
         
         self.btn_list = []
-        for i in range(4):
+        self.btn2_list = []
+        for i in range(5):
             btn = QtWidgets.QPushButton()
             btn.setIcon(QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogOpenButton))
             btn.setMinimumSize(30,30)
             btn.setIconSize(QtCore.QSize(20,20))
             self.btn_list.append(btn)
+            if i<2:
+                btn2 = QtWidgets.QPushButton()
+                btn2.setIcon(QtWidgets.QWidget().style().standardIcon(QtWidgets.QStyle.SP_DialogCloseButton))
+                btn2.setMinimumSize(30,30)
+                btn2.setIconSize(QtCore.QSize(20,20))
+                self.btn2_list.append(btn2)
         
         ###   RAW BASE FOLDER
         self.raw_w = QtWidgets.QWidget()
@@ -423,14 +379,35 @@ class BaseFolderPopup(QtWidgets.QDialog):
         self.probefile_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[3]))
         self.probefile_qlabel.setStyleSheet(qlabel_ss)
         self.probefile_btn = self.btn_list[3]
+        self.probefile_clear = self.btn2_list[0]
         probefile_row1.addWidget(self.probefile_qlabel, stretch=2)
         probefile_row1.addWidget(self.probefile_btn, stretch=0)
+        probefile_row1.addWidget(self.probefile_clear, stretch=0)
         layout.addWidget(self.probefile_w)
+        
+        ###   DEFAULT PARAM FILE
+        self.paramfile_w = QtWidgets.QWidget()
+        paramfile_vlay, paramfile_row0, paramfile_row1 = self.create_hbox_rows()
+        self.paramfile_w.setLayout(paramfile_vlay)
+        paramfile_header = QtWidgets.QLabel('<b>DEFAULT PARAMETERS</b>')
+        paramfile_row0.addWidget(paramfile_header)
+        paramfile_row0.addStretch()
+        self.paramfile_qlabel = QtWidgets.QLabel(fmt.format(self.BASE_FOLDERS[4]))
+        self.paramfile_qlabel.setStyleSheet(qlabel_ss)
+        self.paramfile_btn = self.btn_list[4]
+        self.paramfile_clear = self.btn2_list[1]
+        paramfile_row1.addWidget(self.paramfile_qlabel, stretch=2)
+        paramfile_row1.addWidget(self.paramfile_btn, stretch=0)
+        paramfile_row1.addWidget(self.paramfile_clear, stretch=0)
+        layout.addWidget(self.paramfile_w)
         
         self.raw_btn.clicked.connect(lambda: self.choose_base_ddir(0))
         self.processed_btn.clicked.connect(lambda: self.choose_base_ddir(1))
         self.probe_btn.clicked.connect(lambda: self.choose_base_ddir(2))
         self.probefile_btn.clicked.connect(self.choose_probe_file)
+        self.paramfile_btn.clicked.connect(self.choose_param_file)
+        self.probefile_clear.clicked.connect(self.clear_probe_file)
+        self.paramfile_clear.clicked.connect(self.clear_param_file)
         
         bbox = QtWidgets.QHBoxLayout()
         self.save_btn = QtWidgets.QPushButton('Save')
@@ -453,21 +430,31 @@ class BaseFolderPopup(QtWidgets.QDialog):
         screen_rect = pyfx.ScreenRect()
         qrect.moveCenter(screen_rect.center())  # move center of qr to center of screen
         self.move(qrect.topLeft())
-        
+    
     def choose_probe_file(self):
-        init_ddir = str(self.BASE_FOLDERS[2])
-        dlg = gi.FileDialog(init_ddir=init_ddir, is_probe=True, parent=self)
-        res = dlg.exec()
-        if res:
-            f = dlg.selectedFiles()[0]
-            if ephys.read_probe_file(f) is None:
-                msgbox = gi.MsgboxError(invalid_probe=f)
-                msgbox.exec()
-                return
-            self.BASE_FOLDERS[3] = str(f)
+        probe, fpath = gi.FileDialog.load_file(filetype='probe', parent=self,
+                                               init_ddir=str(self.BASE_FOLDERS[2]))
+        if probe is not None:
+            self.BASE_FOLDERS[3] = str(fpath)
             self.update_base_ddir(3)
             self.save_btn.setEnabled(True)
         
+    def clear_probe_file(self):
+        self.BASE_FOLDERS[3] = ''
+        self.update_base_ddir(3)
+        self.save_btn.setEnabled(True)
+            
+    def choose_param_file(self):
+        param_dict, fpath = gi.FileDialog.load_file(filetype='param', parent=self)
+        if param_dict is not None:
+            self.BASE_FOLDERS[4] = str(fpath)
+            self.update_base_ddir(4)
+            self.save_btn.setEnabled(True)
+    
+    def clear_param_file(self):
+        self.BASE_FOLDERS[4] = ''
+        self.update_base_ddir(4)
+        self.save_btn.setEnabled(True)
         
     def choose_base_ddir(self, i):
         init_ddir = str(self.BASE_FOLDERS[i])
@@ -482,7 +469,6 @@ class BaseFolderPopup(QtWidgets.QDialog):
             self.update_base_ddir(i)
             self.save_btn.setEnabled(True)
             
-    
     def update_base_ddir(self, i):
         fmt = '<code>{}</code>'
         if i==0:
@@ -493,16 +479,13 @@ class BaseFolderPopup(QtWidgets.QDialog):
             self.probe_qlabel.setText(fmt.format(self.BASE_FOLDERS[2]))
         elif i==3:
             self.probefile_qlabel.setText(fmt.format(self.BASE_FOLDERS[3]))
-    
+        elif i==4:
+            self.paramfile_qlabel.setText(fmt.format(self.BASE_FOLDERS[4]))
     
     def save_base_folders(self):
         ddir_list = list(self.BASE_FOLDERS)
         ephys.write_base_dirs(ddir_list)
         self.accept()
-        # msgbox = MsgboxSave(parent=self)
-        # res = msgbox.exec()
-        # if res == QtWidgets.QMessageBox.Yes:
-        #     self.accept()
     
     def create_hbox_rows(self):
         vlay = QtWidgets.QVBoxLayout()
@@ -564,7 +547,6 @@ class RawArrayPopup(QtWidgets.QDialog):
         self.rec_gbox = QtWidgets.QGroupBox('Recording')
         self.rec_gbox.setStyleSheet(gbox_ss)
         rec_lay = pyfx.InterWidgets(self.rec_gbox, 'v')[2]
-        #rec_lay = QtWidgets.QVBoxLayout(self.rec_gbox)
         # sampling rate and recording duration
         rec_hlay1 = QtWidgets.QHBoxLayout()
         self.fs_w = gi.LabeledSpinbox('Sampling rate', double=True, minimum=1, 
@@ -573,11 +555,9 @@ class RawArrayPopup(QtWidgets.QDialog):
                                        maximum=9999999999, suffix=' s')
         self.dur_w.qw.setDecimals(4)
         self.dur_w.qw.setReadOnly(True)
-        #self.dur_w.setEnabled(False)
         rec_hlay1.addWidget(self.fs_w)
         rec_hlay1.addWidget(self.dur_w)
         # units
-        #rec_hlay2 = QtWidgets.QHBoxLayout()
         self.units_w = gi.LabeledCombobox('Units')
         self.units_w.addItems(['uV', 'mV', 'V', 'kV'])
         rec_hlay1.addWidget(self.units_w)
@@ -587,16 +567,13 @@ class RawArrayPopup(QtWidgets.QDialog):
         
         self.bbox = QtWidgets.QWidget()
         bbox_lay = QtWidgets.QHBoxLayout(self.bbox)
-        #bbox_lay.setContentsMargins(0,0,0,0)
         self.continue_btn = QtWidgets.QPushButton('Continue')
-        #self.continue_btn.setEnabled(False)
         self.close_btn = QtWidgets.QPushButton('Cancel')
         bbox_lay.addWidget(self.close_btn)
         bbox_lay.addWidget(self.continue_btn)
         
         self.layout.addWidget(self.dims_gbox)
         self.layout.addWidget(self.rec_gbox)
-        #self.layout.addWidget(self.probe_gbox)
         self.layout.addWidget(self.bbox)
     
     def connect_signals(self):
@@ -663,20 +640,22 @@ class DataWorker(QtCore.QObject):
     AUX_DATA = None
     FS = None
     PROBE_GROUP = None
+    PARAMS = None
     
-    PARAMS = ephys.read_param_file()
-    lfp_fs = PARAMS.pop('lfp_fs')
     units = 'uV'
     lfp_units = 'mV'
     
     def set_filepaths(self, raw_ddir, save_ddir):
+        """ Paths to raw data source file and processed data target folder """
         self.raw_ddir = raw_ddir
         self.save_ddir = save_ddir
     
     def load_raw_data(self, raw_ddir):
+        """ Load ephys data from supported recording system """
         (self.DATA, self.AUX_DATA), self.FS, self.units = dp.load_raw_data(raw_ddir)
     
     def run(self):
+        self.lfp_fs = self.PARAMS.pop('lfp_fs')
         self.dur = self.DATA.shape[1] / self.FS
         idx_by_probe = [prb.device_channel_indices for prb in self.PROBE_GROUP.probes]
         ds_factor = int(self.FS / self.lfp_fs)  # calculate downsampling factor
@@ -686,7 +665,6 @@ class DataWorker(QtCore.QObject):
         self.progress_signal.emit('Extracting LFPs by probe ...')
         
         self.lfp_list = []
-        #print('temporary hack for getting right units')
         for idx in idx_by_probe:
             lfp = np.array([pyfx.Downsample(self.DATA[i], ds_factor)*cf for i in idx])
             self.lfp_list.append(lfp)
@@ -694,7 +672,7 @@ class DataWorker(QtCore.QObject):
         
         
         bp_dicts = {'raw':[], 'theta':[], 'slow_gamma':[], 'fast_gamma':[], 'swr':[], 'ds':[]}
-        std_dfs, swr_dfs, ds_dfs, thresholds = [], [], [], []
+        std_dfs, swr_dfs, ds_dfs, thresholds, noise_trains = [], [], [], [], []
         
         for i,_lfp in enumerate(self.lfp_list):
             hdr = f'ANALYZING PROBE {i+1} / {len(self.lfp_list)}'
@@ -741,29 +719,41 @@ class DataWorker(QtCore.QObject):
             swr_dfs.append(SWR_DF)
             ds_dfs.append(DS_DF)
             thresholds.append(THRESHOLDS)
+            noise_trains.append(np.zeros(len(channels), dtype='int'))
         
         self.progress_signal.emit('Saving data ...')
         ALL_STD = pd.concat(std_dfs, keys=range(len(std_dfs)), ignore_index=False)
         ALL_SWR = pd.concat(swr_dfs, keys=range(len(swr_dfs)), ignore_index=False)
+        ALL_SWR['status'] = 1   # 1=auto-detected; 2=added by user; -1=removed by user
+        ALL_SWR['is_valid'] = 1 # valid events are either auto-detected and not user-removed OR user-added
         ALL_DS = pd.concat(ds_dfs, keys=range(len(ds_dfs)), ignore_index=False)
-        np.save(Path(self.save_ddir, 'lfp_time.npy'), self.lfp_time)
-        np.save(Path(self.save_ddir, 'lfp_fs.npy'), self.lfp_fs)
-        np.savez(Path(self.save_ddir, 'lfp_bp.npz'), **bp_dicts)
+        ALL_DS['status'] = 1
+        ALL_DS['is_valid'] = 1
+        
+        fx = lambda fname: gi.unique_fname(self.save_ddir, fname)
+        np.save(Path(self.save_ddir, fx('lfp_time.npy')), self.lfp_time)
+        np.save(Path(self.save_ddir, fx('lfp_fs.npy')), self.lfp_fs)
+        np.savez(Path(self.save_ddir, fx('lfp_bp.npz')), **bp_dicts)
         
         # save bandpass-filtered power in each channel (index)
-        ALL_STD.to_csv(Path(self.save_ddir, 'channel_bp_std'), index_label=False)
+        ALL_STD.to_csv(Path(self.save_ddir, fx('channel_bp_std')), index_label=False)
         
         # save event quantifications and thresholds
-        ALL_SWR.to_csv(Path(self.save_ddir, 'ALL_SWR'), index_label=False)
-        ALL_DS.to_csv(Path(self.save_ddir, 'ALL_DS'), index_label=False)
-        np.save(Path(self.save_ddir, 'THRESHOLDS.npy'), thresholds)
+        ALL_SWR.to_csv(Path(self.save_ddir, fx('ALL_SWR')), index_label=False)
+        ALL_DS.to_csv(Path(self.save_ddir, fx('ALL_DS')), index_label=False)
+        np.save(Path(self.save_ddir, fx('THRESHOLDS.npy')), thresholds)
+        # initialize noise channels
+        np.save(Path(self.save_ddir, fx('noise_channels.npy')), noise_trains)
         
         # save params and info file
-        with open(Path(self.save_ddir, 'params.pkl'), 'wb') as f:
+        with open(Path(self.save_ddir, fx('params.pkl')), 'wb') as f:
             pickle.dump(self.PARAMS, f)
             
         # write probe group to file
-        prif.write_probeinterface(Path(self.save_ddir, 'probe_group'), self.PROBE_GROUP)
+        prif.write_probeinterface(Path(self.save_ddir, fx('probe_group')), self.PROBE_GROUP)
+        
+        # save AUX data
+        dp.process_aux(self.AUX_DATA, self.FS, self.lfp_fs, self.save_ddir, pprint=False)
         
         self.progress_signal.emit('Done!')
         time.sleep(1)
@@ -774,22 +764,23 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
     RAW_DDIR_VALID = False
     RAW_ARRAY = None
     PROCESSED_DDIR_VALID = False
-    #PROBE_CONFIG_VALID = False
     
-    
-    def __init__(self, mode=2, raw_ddir='', processed_ddir='', probe_ddir='', parent=None):
+    def __init__(self, mode=2, raw_ddir='', processed_ddir='', PARAMS=None, parent=None):
         # 0==base, 1=last visited, 2=last visited IF it's within base
         super().__init__(parent)
-        
-        raw_base, processed_base, probe_base, probe_file  = ephys.base_dirs()
+        self.PARAMS = PARAMS
+        if self.PARAMS is None:
+            self.PARAMS = ephys.get_original_defaults()
+        self.setWindowTitle('Select a raw data source')
+        raw_base, processed_base, probe_base, probe_file, param_file  = ephys.base_dirs()
         # get most recently entered directory
         qfd = QtWidgets.QFileDialog()
         last_ddir = str(qfd.directory().path())
         
+        #findme
         self.raw_ddir = clean(mode, raw_base, last_ddir, str(raw_ddir))
         self.processed_ddir = clean(mode, processed_base, last_ddir, str(processed_ddir))
         self.default_probe_file = probe_file
-        #self.probe_ddir = clean(mode, probe_base, last_ddir, str(probe_ddir)) #delprobe
         
         self.gen_layout()
         self.probe_gbox.hide()
@@ -799,7 +790,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
             self.update_processed_ddir()
         else:
             self.ddw2.update_status(self.processed_ddir, False)
-        
         
         # create worker thread, connect functions
         self.worker_object = DataWorker()
@@ -823,24 +813,25 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         # types of recording files
         self.oe_radio = QtWidgets.QRadioButton('Open Ephys (.oebin)')
         self.nn_radio = QtWidgets.QRadioButton('NeuroNexus (.xdat.json)')
+        self.nl_radio = QtWidgets.QRadioButton('Neuralynx (.ncs)')
         self.manual_radio = QtWidgets.QRadioButton('Upload custom file')
-        for btn in [self.oe_radio, self.nn_radio, self.manual_radio]:
+        for btn in [self.oe_radio, self.nn_radio, self.nl_radio, self.manual_radio]:
             btn.setAutoExclusive(False)
             #btn.setCheckable(False)
             btn.setEnabled(False)
             btn.setStyleSheet('QRadioButton:disabled {color : black;}')
-        self.ddw.grid.addWidget(self.oe_radio, 2, 1, 1, 2)
-        self.ddw.grid.addWidget(self.nn_radio, 2, 3, 1, 2)
+        self.ddw.grid.addWidget(self.oe_radio, 2, 0, 1, 2)
+        self.ddw.grid.addWidget(self.nn_radio, 2, 2, 1, 2)
+        self.ddw.grid.addWidget(self.nl_radio, 2, 4, 1, 2)
+        
         ddir_vbox.addWidget(self.ddw)
         
         # manual file upload with custom parameters 
         custom_bar = QtWidgets.QFrame()
-        #custom_bar.setFrameShape(QtWidgets.QFrame.Panel)
-        #custom_bar.setFrameShadow(QtWidgets.QFrame.Sunken)
         frame_hlay = QtWidgets.QHBoxLayout(custom_bar)
         frame_hlay.setContentsMargins(0,0,0,0)
         self.manual_upload_btn = QtWidgets.QPushButton()
-        self.manual_upload_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_ArrowForward))
+        self.manual_upload_btn.setIcon(QtGui.QIcon(":/icons/load.png"))
         self.manual_upload_flabel = QtWidgets.QLineEdit()
         self.manual_upload_flabel.setReadOnly(True)
         frame_hlay.addWidget(self.manual_radio)
@@ -855,7 +846,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         ddir_vbox2 = pyfx.InterWidgets(self.ddir_gbox2, 'v')[2]
         # create/overwrite processed data directory
         self.ddw2 = DirectorySelectionWidget(title='<b><u>Save data</u></b>', simple=True)
-        #self.ddw2.ddir_lbl.hide()
         self.qedit_hbox2 = self.ddw2.qedit_hbox
         ddir_vbox2.addWidget(self.ddw2)
         
@@ -871,21 +861,12 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         
         settings_vlay.addWidget(self.base_folder_btn)
         settings_vlay.addWidget(self.settings_btn)
-        #self.view_params_btn = QtWidgets.QPushButton('Settings')
-        #self.view_params_btn.setStyleSheet(mode_btn_ss)
-        #settings_vlay.addWidget(self.view_params_btn)
-        #param_vbox.addWidget(self.view_params_btn)
         
         ###   ASSIGN PROBE(S)
-        # #addprobe
-        #self.probe_gbox = ProbeBox()
         self.probe_gbox = QtWidgets.QGroupBox()
         self.probe_gbox.setStyleSheet('QGroupBox {border-width : 0px; font-weight : bold; text-decoration : underline;}')
         self.probe_vbox = pyfx.InterWidgets(self.probe_gbox, 'v')[2]
         
-        #self.probe_vbox.addLayout(self.probe_row0)
-        
-
         ###   ACTION BUTTONS
         
         # continue button
@@ -899,11 +880,9 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         self.tort_btn.setVisible(False)
         self.tort_btn.setEnabled(False)
         self.cancel_btn = QtWidgets.QPushButton('Cancel')
-        #bbox.addWidget(self.cancel_btn)
         bbox.addWidget(self.continue_btn)
         bbox.addWidget(self.tort_btn)
         
-        #self.layout.addWidget(ddir_w)
         self.layout.addWidget(self.ddir_gbox)
         self.layout.addWidget(self.ddir_gbox2)
         self.layout.addWidget(self.probe_gbox) #addprobe
@@ -962,7 +941,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         vstr = [*map(str,vals)]
         klens = [*map(len, keys)]; kmax=max(klens)
         padk = [*map(lambda k: k + '_'*(kmax-len(k))+':', keys)]
-        #rows = [(pdk+vst) for pdk,vst in zip(padk,vstr)]
         html = ['<pre>'+k+v+'</pre>' for k,v in zip(padk,vstr)]
         text = '<h3><tt>DEFAULT PARAMETERS</tt></h3>' + '<hr>' + ''.join(html)
         textwidget = QtWidgets.QTextEdit(text)
@@ -985,9 +963,8 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
     
     def load_array(self):
         # open file, load data array
-        res = gi.FileDialog.load_array_file(parent=self)
-        if not res: return
-        data, fpath = res
+        data, fpath = gi.FileDialog.load_file(filetype='array', parent=self)
+        if data is None: return
         # launch popup to ask for context
         ddict = RawArrayPopup.run(data, default_fs=1000, parent=self)
         if ddict:
@@ -996,9 +973,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
             self.RAW_ARRAY_UNITS = ddict['units']
             self.raw_ddir = os.path.dirname(fpath)
             self.manual_upload_flabel.setText(os.path.basename(fpath))
-            
             self.update_raw_ddir()
-    
     
     def load_data(self):
         self.worker_object.set_filepaths(self.raw_ddir, self.processed_ddir)
@@ -1014,7 +989,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         # initialize probe box
         self.tort = tort(self.worker_object.DATA.shape[0])
         self.tort.check_signal.connect(self.update_probe_config)
-        #self.tort.tort_btn.clicked.connect(self.PROCESS_THE_DATA)
         self.probe_vbox.addWidget(self.tort)
         self.probe_gbox.setVisible(True)
         self.tort_btn.setVisible(True)
@@ -1029,17 +1003,16 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         # disable data loading
         self.ddir_gbox.setEnabled(False)
         self.ddir_gbox2.setEnabled(False)
-        for btn in [self.oe_radio, self.nn_radio, self.manual_radio]:
+        for btn in [self.oe_radio, self.nn_radio, self.nl_radio, self.manual_radio]:
             btn.setStyleSheet('QRadioButton:disabled {color : gray;}')
         self.center_window()
         
         #QtCore.QTimer.singleShot(10, self.center_window)
     
-        
     def update_probe_config(self):
         x = bool(self.tort.tort_btn.isEnabled())
         self.tort.prb_icon_btn.new_status(x)
-        self.tort_btn.setEnabled(x)
+        self.tort_btn.setEnabled(bool(x and self.PARAMS is not None))
         
     
     def select_ddir(self):
@@ -1060,21 +1033,18 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         xdat_files = [f for f in files if f.endswith('.xdat.json')]
         a = bool('structure.oebin' in files)
         b = bool(len(xdat_files) > 0)
-        c = bool(self.manual_upload_flabel.text() in files and self.RAW_ARRAY is not None)
-        x = bool(a or b or c)
+        c = bool(len([f for f in files if f.endswith('.ncs')]) > 0)
+        d = bool(self.manual_upload_flabel.text() in files and self.RAW_ARRAY is not None)
+        x = bool(a or b or c or d)
         
         # update widgets
-        try:
-            self.ddw.update_status(self.raw_ddir, x)
-        except:
-            pdb.set_trace()
+        self.ddw.update_status(self.raw_ddir, x)
         self.oe_radio.setChecked(a)  # recording system buttons
         self.nn_radio.setChecked(b)
-        self.manual_radio.setChecked(c)
+        self.nl_radio.setChecked(c)
+        self.manual_radio.setChecked(d)
         
         self.RAW_DDIR_VALID = bool(x)
-        #self.ddir_gbox2.setVisible(x)
-        #self.probe_gbox.setVisible(bool(x and self.PROCESSED_DDIR_VALID)) #delprobe
         self.adjustSize()
         self.continue_btn.setEnabled(bool(self.RAW_DDIR_VALID and self.PROCESSED_DDIR_VALID)) #delprobe and self.PROBE_CONFIG_VALID))
     
@@ -1089,19 +1059,6 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
     
     
     def update_processed_ddir(self):
-        # nexisting = len(os.listdir(self.processed_ddir))
-        # if nexisting > 0:
-        #     # txt = (f'The directory <code>{self.processed_ddir.split(os.sep)[-1]}</code> contains '
-        #     #        f'{nexisting} items.<br><br>I have taken away your overwrite '
-        #     #        'privileges for the time being.<br><br>Stop almost deleting important things!!')
-        #     # msg = '<center>{}</center>'.format(txt)
-        #     # res = QtWidgets.QMessageBox.warning(self, 'fuck you', msg, 
-        #     #                                     QtWidgets.QMessageBox.NoButton, QtWidgets.QMessageBox.Close)
-        #     res = gi.MsgboxWarning.overwrite_warning(self.processed_ddir, parent=self)
-        #     if res:
-        #         shutil.rmtree(self.processed_ddir)
-        #         os.makedirs(self.processed_ddir)
-        
         # update widgets
         self.ddw2.update_status(self.processed_ddir, True)
         
@@ -1109,9 +1066,7 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
         #self.probe_gbox.setVisible(bool(self.RAW_DDIR_VALID)) #delprobe
         self.adjustSize()
         self.continue_btn.setEnabled(bool(self.RAW_DDIR_VALID and self.PROCESSED_DDIR_VALID)) #delprobe and self.PROBE_CONFIG_VALID))
-        
-        
-        #self.accept()
+    
     
     def PROCESS_THE_DATA(self):
         
@@ -1122,22 +1077,15 @@ class RawDirectorySelectionPopup(QtWidgets.QDialog):
             prb = item.probe
             rows = item.ROWS  # group of rows belonging to this probe
             # reorder assigned rows by device indices
-            try:
-                sorted_rows = [rows[dvi] for dvi in prb.device_channel_indices]
-            except:
-                pdb.set_trace()
+            sorted_rows = [rows[dvi] for dvi in prb.device_channel_indices]
             prb.set_contact_ids(rows)
             # device_indices * nprobes + start_row = sorted_rows
             prb.set_device_channel_indices(sorted_rows)
             self.PROBE_GROUP.add_probe(item.probe)
         
         self.worker_object.PROBE_GROUP = self.PROBE_GROUP
+        self.worker_object.PARAMS = self.PARAMS
         self.start_work()
-        # PARAMS = ephys.read_param_file()
-        # lfp_fs = PARAMS.pop('lfp_fs')
-        
-        # # get signal array for each probe
-        # lfp_list = dp.extract_data_by_probe(self.DATA, PROBE_GROUP, fs=self.FS, lfp_fs=lfp_fs)
         
     def accept(self):
         print(f'Raw data folder: {self.raw_ddir}')
@@ -1243,15 +1191,11 @@ class tort(QtWidgets.QWidget):
         self.gen_layout()
         self.connect_signals()
         self.tort_btn = QtWidgets.QPushButton('PROCESS DATA')
-        #self.tort_btn.clicked.connect(self.generate_probe)
         self.tort_btn.setEnabled(False)
-        #self.layout.addWidget(self.tort_btn)
-    
     
     def gen_layout(self):
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setContentsMargins(0,0,0,0)
-        
         
         # title and status button
         self.row0 = QtWidgets.QHBoxLayout()
@@ -1279,9 +1223,6 @@ class tort(QtWidgets.QWidget):
         qframe_layout.setSpacing(10)
         #self.qframe.setStyleSheet('QFrame {background-color:red;}')
         self.qlayout = QtWidgets.QVBoxLayout()  # probe row container
-        #hbox = QtWidgets.QHBoxLayout()          # action button container
-        #hbox.addWidget(self.load_prb)
-        #hbox.addWidget(self.create_prb)
         qframe_layout.addLayout(self.qlayout, stretch=2)
         #qframe_layout.addLayout(hbox, stretch=0)
         
@@ -1340,24 +1281,23 @@ class tort(QtWidgets.QWidget):
         
         self.layout.addLayout(self.hlay)
         
-        #self.layout.addWidget(self.data_lbl)
-        #self.layout.addWidget(self.qframe)
-        #self.layout.addLayout(hbox)
     
     def connect_signals(self):
+        """ Connect widgets to functions """
         self.load_prb.clicked.connect(self.load_probe_from_file)
         self.create_prb.clicked.connect(self.design_probe)
         self.view_assignments_btn.clicked.connect(self.view_data_assignments)
         self.block_radio.toggled.connect(self.switch_index_mode)
     
-    
     def view_data_assignments(self):
+        """ Show probe(s) assigned to each data signal """
         tbl = gi.TableWidget(self.data_assign_df)
         dlg = gi.Popup(widgets=[tbl], title='Data Assignments', parent=self)
         dlg.exec()
         
         
     def switch_index_mode(self, chk):
+        """ Assign probes to contiguous blocks or distributed rows of data """
         self.MODE = int(not chk)  # if block btn is checked, mode = 0
         
         items = pyfx.layout_items(self.qlayout)
@@ -1375,6 +1315,7 @@ class tort(QtWidgets.QWidget):
                 
         
     def add_probe_row(self, probe):
+        """ Add new probe to collection """
         nch = probe.get_contact_count()
         # require enough remaining rows to assign probe channels
         try:
@@ -1410,6 +1351,7 @@ class tort(QtWidgets.QWidget):
     
     
     def del_probe_row(self, probe_row):
+        """ Remove assigned probe from collection """
         # position of probe object to be deleted
         idx = pyfx.layout_items(self.qlayout).index(probe_row)
         
@@ -1430,34 +1372,8 @@ class tort(QtWidgets.QWidget):
         self.check_assignments()
     
     
-    def check_assignments(self):
-        # list probe(s) associated with each data row
-        items = pyfx.layout_items(self.qlayout)
-        
-        # allow different-size probes in block mode, but disable alternate mode
-        x = len(np.unique([item.nch for item in items])) < 2
-        self.inter_radio.setEnabled(x)
-        
-        ALL_ROWS = {}
-        for k in np.arange(self.nrows):
-            ALL_ROWS[k] = [i for i,item in enumerate(items) if k in item.ROWS]
-            
-        # probe config is valid IF each row is matched with exactly 1 probe
-        matches = [len(x)==1 for x in ALL_ROWS.values()]
-        nvalid = len(np.nonzero(matches)[0])
-        is_valid = bool(nvalid == self.nrows)
-        
-        #is_valid = bool(all([len(x)==1 for x in ALL_ROWS.values()]))
-        
-        probe_strings = [', '.join(np.array(x, dtype=str)) for x in ALL_ROWS.values()]
-        self.data_assign_df = pd.DataFrame({'Row':ALL_ROWS.keys(), 
-                                            'Probe(s)':probe_strings})  # assignment dataframe
-        self.tort_btn.setEnabled(is_valid)  # require valid config for next step
-        self.data_lbl.setText(self.data_txt_fmt % (['red','green'][int(is_valid)], nvalid))
-        self.check_signal.emit()
-            
-        
     def copy_probe_row(self, probe_row):
+        """ Duplicate an assigned probe """
         # copy probe configuration to new probe object, add as row
         orig_probe = probe_row.probe
         new_probe = orig_probe.copy()
@@ -1467,34 +1383,16 @@ class tort(QtWidgets.QWidget):
         new_probe.set_device_channel_indices(np.array(orig_probe.device_channel_indices))
         self.add_probe_row(new_probe)
     
-    # def save_probe_row(self, probe_row):
-    #     probe = probe_row.probe
-    #     filename = f'{probe.name}_config.json'
-    #     fpath = str(Path(ephys.base_dirs()[2], filename))
-    #     if os.path.exists(fpath):
-    #         msgbox = gi.MsgboxWarning(overwrite_file=fpath)
-    #         res = msgbox.exec()
-    #         if res != QtWidgets.QMessageBox.Yes:
-    #             return
-    #     # save probe file in desired file format
-    #     res = ephys.write_probe_file(probe, fpath)
-    #     if res:
-    #         print('Probe saved!')
     
-    # def edit_probe_row(self, probe_row):
-    #     print('under construction')
-    #     my_probegod = probegod(probe_row.probe)
-    #     dlg = gi.Popup(widgets=[my_probegod], title='probegod edit')
-    #     dlg.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
-    #     my_probegod.accept_signal.connect(dlg.accept)
-    #     my_probegod.toggle_bgrp.buttonToggled.connect(lambda: QtCore.QTimer.singleShot(10, dlg.center_window))
-    #     res = dlg.exec()
-    #     # if res:
-    #     #     edited_probe = my_probegod.probe
-            
+    def load_probe_from_file(self):
+        """ Load probe object from saved file, add to collection """
+        probe, _ = gi.FileDialog.load_file(filetype='probe', parent=self)
+        if probe is None: return
+        self.add_probe_row(probe)
     
-        
+    
     def design_probe(self):
+        """ Create """
         my_probegod = probegod()
         my_probegod.accept_btn.setVisible(True)
         dlg = gi.Popup(widgets=[my_probegod], title='Create probe')
@@ -1508,39 +1406,29 @@ class tort(QtWidgets.QWidget):
         if res:
             probe = my_probegod.probe
             self.add_probe_row(probe)
-            
-            
-    def load_probe_from_file(self):
-        """ Load probe object from saved file, add to probe collection """
-        probe = gi.FileDialog.load_probe_file(parent=self)
-        if probe is None: return
-        self.add_probe_row(probe)
+    
+    def check_assignments(self):
+        """ Check for valid assignment upon probe addition/deletion/reindexing """
+        # list probe(s) associated with each data row
+        items = pyfx.layout_items(self.qlayout)
         
-
+        # allow different-size probes in block mode, but disable in alternate mode
+        x = len(np.unique([item.nch for item in items])) < 2
+        self.inter_radio.setEnabled(x)
         
-#%%
-if __name__ == '__main__':
-    pyfx.qapp()
-    
-    #ddir = ('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/saved_data/NN_JG008')
-    #popup = InfoView(ddir=ddir)
-    
-    arr = np.load('/Users/amandaschott/Library/CloudStorage/Dropbox/Farrell_Programs/'
-                  'stanford/JF512/DownsampleLFP.npy')
-    
-    gbox = tort(nrows=arr.shape[0])
-    #popup = gi.Popup(widgets=[gbox])
-    #popup.layout.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
-    
-    # popup = QtWidgets.QDialog()
-    # lay = QtWidgets.QVBoxLayout(popup)
-    # lay.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
-    # lay.addWidget(gbox)
-    
-    #popup = BaseFolderPopup()
-    popup = RawArrayPopup(arr)
-    #popup = RawDirectorySelectionPopup()
-    
-    popup.show()
-    popup.raise_()
-    popup.exec()
+        ALL_ROWS = {}
+        for k in np.arange(self.nrows):
+            ALL_ROWS[k] = [i for i,item in enumerate(items) if k in item.ROWS]
+            
+        # probe config is valid IF each row is matched with exactly 1 probe
+        matches = [len(x)==1 for x in ALL_ROWS.values()]
+        nvalid = len(np.nonzero(matches)[0])
+        is_valid = bool(nvalid == self.nrows)
+        
+        probe_strings = [', '.join(np.array(x, dtype=str)) for x in ALL_ROWS.values()]
+        self.data_assign_df = pd.DataFrame({'Row':ALL_ROWS.keys(), 
+                                            'Probe(s)':probe_strings})  # assignment dataframe
+        self.tort_btn.setEnabled(is_valid)  # require valid config for next step
+        self.data_lbl.setText(self.data_txt_fmt % (['red','green'][int(is_valid)], nvalid))
+        self.check_signal.emit()
+        
