@@ -30,7 +30,7 @@ The "Base Folders" window allows you to set default folders and files for data a
 
 <p align="center"><img src="_img/base_folders.png" width=50%/></p>
 
-**<u>Raw Data:</u>** Select the directory where your raw data files are stored; the default location is the Toothy folder itself. Updating this location is optional but convenient for selecting raw recording data for initial processing.
+**<ins>Raw Data:</ins>** Select the directory where your raw data files are stored; the default location is the Toothy folder itself. Updating this location is optional but convenient for selecting raw recording data for initial processing.
 
 **<u>Probe Files:</u>** Select the directory where your probe configuration files will be stored. The application automatically creates a ```probe_configs``` directory within the Toothy folder and creates a ```demo_probe_config.json``` file as an example probe object.
 
