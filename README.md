@@ -122,8 +122,8 @@ Toothy supports automatic data loading from the following acquisition systems:
 * **<u>OpenEphys</u>:** data source must contain a ```structure.oebin``` metadata file
 * **<u>Neuralynx</u>:** data source must contain unique ```.ncs``` files for each channel
 
-<p align="left"><img align="left", src="_img/folder_color.png" width=2%/> &nbsp; button: select raw data directory from a supported recording system</p>
-<p align="left"><img align="left", src="_img/load.png" width=2%/> &nbsp; button: select raw data file in a supported format (see below)</p>
+<p align="left"><img align="left", src="_img/folder_color.png" width=2%/>&nbsp;button: select raw data directory from a supported recording system</p>
+<p align="left"><img align="left", src="_img/load.png" width=2%/>&nbsp;button: select raw data file in a supported format (see below)</p>
 
 ### Loading Data from a File
 
